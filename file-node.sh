@@ -274,7 +274,9 @@ show_direct_menu() {
   echo "7) Service logs"
   echo "8) Uninstall"
   echo "========================================="
-  read -r -p "Select an option [1-8]: " choice
+  printf "Select an option [1-8]: "
+  read -r choice
+  echo
 
   case "$choice" in
     1) install_app ;;
@@ -299,12 +301,13 @@ show_docker_menu() {
 }
 
 show_deployment_menu() {
-  echo
   echo "========== $APP_TITLE Installer =========="
   echo "1) Direct install (systemd)"
   echo "2) Docker install (Compose)"
   echo "============================================"
-  read -r -p "Select a deployment mode [1-2]: " mode_choice
+  printf "Select a deployment mode [1-2]: "
+  read -r mode_choice
+  echo
 
   case "$mode_choice" in
     1) show_direct_menu ;;
