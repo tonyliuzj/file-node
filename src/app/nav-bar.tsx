@@ -13,7 +13,6 @@ import {
   Monitor,
   Moon,
   Search,
-  Settings,
   Shield,
   Sun,
 } from 'lucide-react';
@@ -169,14 +168,6 @@ export default function NavBar() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {!isViewer && (
-            <Button asChild variant="outline" size="sm" className="hidden sm:flex">
-              <Link href="/admin/backends">
-                <Settings className="h-4 w-4" />
-                Backends
-              </Link>
-            </Button>
-          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon">

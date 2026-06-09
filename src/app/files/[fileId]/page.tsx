@@ -3,7 +3,7 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { Loader2, FileQuestion } from 'lucide-react';
+import { Download, FileQuestion, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import PdfViewerClient from './PdfViewerClient';
@@ -19,6 +19,7 @@ function ViewerContent() {
   const path = searchParams.get('path') || '';
   
   const src = `/api/files/view?backendId=${encodeURIComponent(backendId)}&path=${encodeURIComponent(path)}`;
+  const downloadUrl = `${src}&download=1`;
   const ext = path.split('.').pop()?.toLowerCase();
 
   let viewerElement: React.ReactNode;
@@ -40,13 +41,37 @@ function ViewerContent() {
       </div>
     );
   } else if (ext && ['mp4', 'webm', 'ogg'].includes(ext)) {
-    viewerElement = <VideoViewerClient fileUrl={src} fileName={fileName} />;
+    viewerElement = (
+      <VideoViewerClient
+        fileUrl={src}
+        downloadUrl={downloadUrl}
+        fileName={fileName}
+      />
+    );
   } else if (ext && ['txt', 'js', 'ts', 'html', 'css', 'json', 'xml', 'yaml', 'csv'].includes(ext)) {
-    viewerElement = <TextViewerClient fileUrl={src} fileName={fileName} />;
+    viewerElement = (
+      <TextViewerClient
+        fileUrl={src}
+        downloadUrl={downloadUrl}
+        fileName={fileName}
+      />
+    );
   } else if (ext && ['mp3', 'wav'].includes(ext)) {
-    viewerElement = <AudioViewerClient fileUrl={src} fileName={fileName} />;
+    viewerElement = (
+      <AudioViewerClient
+        fileUrl={src}
+        downloadUrl={downloadUrl}
+        fileName={fileName}
+      />
+    );
   } else if (ext && ['md', 'markdown'].includes(ext)) {
-    viewerElement = <MarkdownViewerClient fileUrl={src} fileName={fileName} />;
+    viewerElement = (
+      <MarkdownViewerClient
+        fileUrl={src}
+        downloadUrl={downloadUrl}
+        fileName={fileName}
+      />
+    );
   } else {
     viewerElement = (
       <div className="flex flex-col items-center justify-center h-full bg-muted/40 p-4 text-center">
@@ -60,7 +85,8 @@ function ViewerContent() {
               This file type cannot be previewed in the browser.
             </p>
             <Button asChild>
-              <a href={src} download={fileName}>
+              <a href={downloadUrl} download={fileName}>
+                <Download className="h-4 w-4" />
                 Download
               </a>
             </Button>
@@ -71,8 +97,21 @@ function ViewerContent() {
   }
 
   return (
-    <div className="flex-1 relative overflow-hidden bg-background h-full">
-      {viewerElement}
+    <div className="flex h-full flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b bg-background px-4 py-2">
+        <div className="min-w-0 truncate text-sm font-medium" title={fileName}>
+          {fileName}
+        </div>
+        <Button asChild size="sm" variant="outline">
+          <a href={downloadUrl} download={fileName}>
+            <Download className="h-4 w-4" />
+            Download
+          </a>
+        </Button>
+      </div>
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {viewerElement}
+      </div>
     </div>
   );
 }

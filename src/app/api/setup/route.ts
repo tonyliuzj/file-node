@@ -23,19 +23,19 @@ export async function POST(req: NextRequest) {
     const nextConfirmPassword =
       typeof confirmPassword === 'string' ? confirmPassword : '';
 
-    if (!/^[a-zA-Z0-9._-]{3,64}$/.test(nextUsername)) {
+    if (!/^[a-zA-Z0-9._@-]{3,64}$/.test(nextUsername)) {
       return NextResponse.json(
         {
           error:
-            'Username must be 3-64 characters using letters, numbers, dots, dashes, or underscores',
+            'Username must be 3-64 characters using letters, numbers, dots, dashes, underscores, or @',
         },
         { status: 400 }
       );
     }
 
-    if (nextPassword.length < 10) {
+    if (!nextPassword) {
       return NextResponse.json(
-        { error: 'Password must be at least 10 characters' },
+        { error: 'Password is required' },
         { status: 400 }
       );
     }

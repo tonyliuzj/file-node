@@ -30,8 +30,8 @@ export default function SetupClient() {
     setError('');
     setSuccess('');
 
-    if (password.length < 10) {
-      setError('Password must be at least 10 characters');
+    if (!password) {
+      setError('Password is required');
       return;
     }
 
@@ -100,7 +100,7 @@ export default function SetupClient() {
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Use 3-64 letters, numbers, dots, dashes, or underscores.
+                Use 3-64 letters, numbers, dots, dashes, underscores, or @.
               </p>
             </div>
             <div className="space-y-2">

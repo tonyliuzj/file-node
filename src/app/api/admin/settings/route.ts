@@ -132,15 +132,9 @@ export async function PUT(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (nextUsername && !/^[a-zA-Z0-9._-]{3,64}$/.test(nextUsername)) {
+    if (nextUsername && !/^[a-zA-Z0-9._@-]{3,64}$/.test(nextUsername)) {
       return NextResponse.json(
-        { error: 'Username must be 3-64 characters using letters, numbers, dots, dashes, or underscores' },
-        { status: 400 }
-      );
-    }
-    if (nextPassword && nextPassword.length < 10) {
-      return NextResponse.json(
-        { error: 'New password must be at least 10 characters' },
+        { error: 'Username must be 3-64 characters using letters, numbers, dots, dashes, underscores, or @' },
         { status: 400 }
       );
     }

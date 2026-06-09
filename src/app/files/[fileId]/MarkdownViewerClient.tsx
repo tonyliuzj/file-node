@@ -12,10 +12,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface MarkdownViewerProps {
   fileUrl: string;
+  downloadUrl: string;
   fileName: string;
 }
 
-export default function MarkdownViewerClient({ fileUrl, fileName }: MarkdownViewerProps) {
+export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }: MarkdownViewerProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +56,7 @@ export default function MarkdownViewerClient({ fileUrl, fileName }: MarkdownView
             <AlertCircle className="h-8 w-8 text-destructive" />
             <p className="font-medium">{error}</p>
             <Button asChild>
-            <a href={fileUrl} download={fileName}>
+            <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />
                 Download
             </a>
@@ -107,7 +108,7 @@ export default function MarkdownViewerClient({ fileUrl, fileName }: MarkdownView
       </ScrollArea>
       <div className="p-4 border-t bg-background flex justify-end z-10">
         <Button asChild size="sm">
-            <a href={fileUrl} download={fileName}>
+            <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />
                 Download
             </a>

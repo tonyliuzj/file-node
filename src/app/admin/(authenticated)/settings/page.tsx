@@ -113,11 +113,6 @@ export default function SettingsPage() {
       setError('New passwords do not match');
       return;
     }
-    if (newPassword && newPassword.length < 10) {
-      setError('New password must be at least 10 characters');
-      return;
-    }
-
     setLoading(true);
 
     try {
@@ -274,7 +269,7 @@ export default function SettingsPage() {
                 disabled={loading}
               />
               <p className="text-xs text-muted-foreground">
-                Use 3-64 letters, numbers, dots, dashes, or underscores.
+                Use 3-64 letters, numbers, dots, dashes, underscores, or @.
               </p>
             </div>
 

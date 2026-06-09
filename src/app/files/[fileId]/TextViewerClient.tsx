@@ -9,12 +9,13 @@ import { Card, CardContent } from '@/components/ui/card';
 
 interface TextViewerProps {
   fileUrl: string;
+  downloadUrl: string;
   fileName: string;
 }
 
 type ThemeStyle = SyntaxHighlighterProps['style'];
 
-export default function TextViewerClient({ fileUrl, fileName }: TextViewerProps) {
+export default function TextViewerClient({ fileUrl, downloadUrl, fileName }: TextViewerProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +73,7 @@ export default function TextViewerClient({ fileUrl, fileName }: TextViewerProps)
             <AlertCircle className="h-8 w-8 text-destructive" />
             <p className="font-medium">{error}</p>
             <Button asChild>
-            <a href={fileUrl} download={fileName}>
+            <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />
                 Download
             </a>
@@ -127,7 +128,7 @@ export default function TextViewerClient({ fileUrl, fileName }: TextViewerProps)
       </div>
       <div className="p-4 border-t bg-background flex justify-end">
         <Button asChild size="sm">
-             <a href={fileUrl} download={fileName}>
+             <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />
                 Download
              </a>

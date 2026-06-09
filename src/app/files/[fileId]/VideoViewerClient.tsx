@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button';
 
 interface VideoViewerProps {
   fileUrl: string;
+  downloadUrl: string;
   fileName: string;
 }
 
-export default function VideoViewerClient({ fileUrl, fileName }: VideoViewerProps) {
+export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: VideoViewerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -186,7 +187,7 @@ export default function VideoViewerClient({ fileUrl, fileName }: VideoViewerProp
 
                 <div className="flex items-center gap-2">
                     <a
-                        href={fileUrl}
+                        href={downloadUrl}
                         download={fileName}
                         className="p-2 rounded-md hover:bg-white/20 text-white"
                         title="Download"

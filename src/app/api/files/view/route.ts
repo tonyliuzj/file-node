@@ -132,9 +132,11 @@ export async function GET(request: NextRequest) {
   const filename = encodeURIComponent(
     filePath.split('/').pop()?.replace(/["\r\n]/g, '') || 'file'
   );
+  const disposition =
+    url.searchParams.get('download') === '1' ? 'attachment' : 'inline';
   responseHeaders.set(
     'content-disposition',
-    `inline; filename="${filename}"`
+    `${disposition}; filename="${filename}"`
   );
 
   return new NextResponse(upstream.body, {

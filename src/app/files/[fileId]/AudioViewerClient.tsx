@@ -8,10 +8,11 @@ import { Card, CardContent } from '@/components/ui/card';
 
 interface AudioViewerProps {
   fileUrl: string;
+  downloadUrl: string;
   fileName: string;
 }
 
-export default function AudioViewerClient({ fileUrl, fileName }: AudioViewerProps) {
+export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: AudioViewerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -117,7 +118,7 @@ export default function AudioViewerClient({ fileUrl, fileName }: AudioViewerProp
             
             <div className="mt-8 flex justify-center">
                 <Button variant="link" asChild size="sm">
-                    <a href={fileUrl} download={fileName}>
+                    <a href={downloadUrl} download={fileName}>
                         <Download className="mr-2 h-4 w-4" />
                         Download File
                     </a>
