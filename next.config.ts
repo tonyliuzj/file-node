@@ -2,16 +2,25 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  webpack(config: any, { isServer }: { isServer: boolean }): any {
-      if (!isServer) {
-        config.externals = config.externals || [];
-        config.externals.push({
-          canvas: '{}', // Replace with empty object
-          'canvas-prebuilt': '{}' // Also handle canvas-prebuilt if needed
-        });
-      }
-      return config;
-    },
+  webpack(config, { isServer }) {
+    if (!isServer) {
+      const externals = Array.isArray(config.externals)
+        ? config.externals
+        : config.externals
+          ? [config.externals]
+          : [];
+
+      config.externals = [
+        ...externals,
+        {
+          canvas: '{}',
+          'canvas-prebuilt': '{}',
+        },
+      ];
+    }
+
+    return config;
+  },
 };
 
 export default nextConfig;
