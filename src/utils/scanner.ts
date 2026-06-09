@@ -36,6 +36,7 @@ const FETCH_TIMEOUT_MS = Number(
     process.env.LIBRIX_SCAN_TIMEOUT_MS ??
     15000
 );
+const IGNORED_SCAN_PATH_PREFIXES = ['/cgi-bin/'];
 
 function withTrailingSlash(value: string) {
   return value.endsWith('/') ? value : `${value}/`;
@@ -97,6 +98,15 @@ function toVirtualPath(urlObj: URL, backendRoot: URL, isDirectory: boolean) {
   if (isDirectory && !relativePath.endsWith('/')) relativePath += '/';
 
   return relativePath;
+}
+
+function isIgnoredScanPath(virtualPath: string) {
+  const normalizedPath = virtualPath.endsWith('/')
+    ? virtualPath
+    : `${virtualPath}/`;
+  return IGNORED_SCAN_PATH_PREFIXES.some((prefix) =>
+    normalizedPath.startsWith(prefix)
+  );
 }
 
 export async function scanBackendById(id: number) {
@@ -161,6 +171,7 @@ export async function scanBackendById(id: number) {
 
       const filePath = toVirtualPath(urlObj, backendRoot, isDir);
       if (!filePath || filePath === normalizedDirPath) return;
+      if (isIgnoredScanPath(filePath)) return;
 
       const remainder = filePath
         .slice(normalizedDirPath.length)
