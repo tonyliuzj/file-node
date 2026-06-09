@@ -126,7 +126,7 @@ file-node/
 | Variable          | Description                             |
 | ----------------- | --------------------------------------- |
 | `FILE_NODE_SECRET_KEY` | Optional persistent server secret for backend credential encryption |
-| `PORT` | Optional port for local/PM2 startup |
+| `PORT` | Optional port for local/systemd startup |
 
 ### Initial Setup
 

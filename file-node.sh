@@ -8,8 +8,11 @@ GIT_REPO="${GIT_REPO:-https://github.com/tonyliuzj/file-node.git}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/file-node}"
 PORT="${PORT:-3000}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
-PROCESS_NAME="${PROCESS_NAME:-file-node}"
 ENV_FILE=".env.local"
+SERVICE_NAME="${SERVICE_NAME:-file-node.service}"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
+RUN_USER="${SUDO_USER:-$USER}"
+RUN_GROUP="$(id -gn "$RUN_USER")"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -31,6 +34,13 @@ step() {
 require_linux() {
   if [ "$(uname -s)" != "Linux" ]; then
     echo "This installer targets Linux servers. Clone manually for other systems."
+    exit 1
+  fi
+}
+
+require_systemd() {
+  if ! command_exists systemctl; then
+    echo "systemd is required for direct install, but systemctl was not found."
     exit 1
   fi
 }
@@ -64,16 +74,6 @@ ensure_nodejs() {
 
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | as_root bash -
   as_root apt install -y nodejs
-}
-
-ensure_pm2() {
-  step "Checking PM2"
-  if command_exists pm2; then
-    echo "PM2 detected."
-    return
-  fi
-
-  as_root npm install -g pm2
 }
 
 ensure_repo() {
@@ -129,34 +129,77 @@ build_app() {
   npm run build
 }
 
-start_pm2() {
-  step "Starting $APP_TITLE with PM2"
-  pm2 delete "$PROCESS_NAME" >/dev/null 2>&1 || true
-  pm2 start npm --name "$PROCESS_NAME" -- run start -- -p "$PORT"
-  pm2 save
+write_systemd_service() {
+  local node_bin npm_bin
+
+  node_bin="$(command -v node)"
+  npm_bin="$(command -v npm)"
+
+  step "Writing systemd service"
+  as_root tee "$SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=$APP_TITLE
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$RUN_USER
+Group=$RUN_GROUP
+WorkingDirectory=$INSTALL_DIR
+Environment=NODE_ENV=production
+Environment=PATH=$(dirname "$node_bin"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=$INSTALL_DIR/$ENV_FILE
+ExecStart=$npm_bin run start -- -p $PORT
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+SyslogIdentifier=$APP_NAME
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+reload_and_restart_service() {
+  step "Reloading systemd and restarting service"
+  as_root systemctl daemon-reload
+  as_root systemctl enable "$SERVICE_NAME"
+  as_root systemctl restart "$SERVICE_NAME"
 
   echo
-  echo "PM2 process: $PROCESS_NAME"
+  echo "Service: $SERVICE_NAME"
   echo "Visit: http://localhost:$PORT"
   echo "First run setup: http://localhost:$PORT/setup"
-  echo "Logs: pm2 logs $PROCESS_NAME"
-  echo "Enable startup after reboot: pm2 startup"
+  echo "Logs: sudo journalctl -u $SERVICE_NAME -f"
+  echo "Status: sudo systemctl status $SERVICE_NAME"
+}
+
+stop_and_remove_service() {
+  if as_root test -f "$SERVICE_FILE"; then
+    step "Stopping and removing systemd service"
+    as_root systemctl disable --now "$SERVICE_NAME" || true
+    as_root rm -f "$SERVICE_FILE"
+    as_root systemctl daemon-reload
+  fi
 }
 
 install_app() {
   require_linux
+  require_systemd
   install_system_dependencies
   ensure_nodejs
-  ensure_pm2
   ensure_repo
   ensure_env_file
   install_node_dependencies
   build_app
-  start_pm2
+  write_systemd_service
+  reload_and_restart_service
 }
 
 update_app() {
   require_linux
+  require_systemd
   if [ ! -d "$INSTALL_DIR/.git" ]; then
     echo "$APP_TITLE is not installed in $INSTALL_DIR."
     exit 1
@@ -168,33 +211,42 @@ update_app() {
   ensure_env_file
   install_node_dependencies
   build_app
-  start_pm2
+  write_systemd_service
+  reload_and_restart_service
 }
 
 start_app() {
-  pm2 start "$PROCESS_NAME"
+  require_systemd
+  as_root systemctl start "$SERVICE_NAME"
+  as_root systemctl status "$SERVICE_NAME" --no-pager
 }
 
 stop_app() {
-  pm2 stop "$PROCESS_NAME"
+  require_systemd
+  as_root systemctl stop "$SERVICE_NAME"
+  echo "$SERVICE_NAME stopped."
 }
 
 restart_app() {
-  pm2 restart "$PROCESS_NAME"
+  require_systemd
+  as_root systemctl restart "$SERVICE_NAME"
+  as_root systemctl status "$SERVICE_NAME" --no-pager
 }
 
 status_app() {
-  pm2 status "$PROCESS_NAME"
+  require_systemd
+  as_root systemctl status "$SERVICE_NAME" --no-pager
 }
 
 logs_app() {
-  pm2 logs "$PROCESS_NAME"
+  require_systemd
+  as_root journalctl -u "$SERVICE_NAME" -f
 }
 
 uninstall_app() {
   echo "Uninstalling $APP_TITLE"
-  pm2 delete "$PROCESS_NAME" >/dev/null 2>&1 || true
-  pm2 save || true
+  require_systemd
+  stop_and_remove_service
 
   if [ -d "$INSTALL_DIR" ]; then
     read -r -p "Remove $INSTALL_DIR, including data? [y/N]: " answer
@@ -207,20 +259,21 @@ uninstall_app() {
   fi
 }
 
-show_menu() {
-  echo "========== $APP_TITLE Installer =========="
+show_direct_menu() {
+  echo
+  echo "====== Direct Deployment (systemd) ======"
   echo "Install dir: $INSTALL_DIR"
   echo "Port:        $PORT"
   echo
   echo "1) Install"
   echo "2) Update"
-  echo "3) Start"
-  echo "4) Stop"
-  echo "5) Restart"
-  echo "6) Status"
-  echo "7) Logs"
+  echo "3) Start service"
+  echo "4) Stop service"
+  echo "5) Restart service"
+  echo "6) Service status"
+  echo "7) Service logs"
   echo "8) Uninstall"
-  echo "=========================================="
+  echo "========================================="
   read -r -p "Select an option [1-8]: " choice
 
   case "$choice" in
@@ -236,4 +289,28 @@ show_menu() {
   esac
 }
 
-show_menu
+show_docker_menu() {
+  echo
+  echo "====== Docker Deployment (Compose) ======"
+  echo "Docker deployment is not configured for this repository yet."
+  echo "Add a Dockerfile and docker-compose.yml before using this mode."
+  echo "========================================="
+  exit 1
+}
+
+show_deployment_menu() {
+  echo
+  echo "========== $APP_TITLE Installer =========="
+  echo "1) Direct install (systemd)"
+  echo "2) Docker install (Compose)"
+  echo "============================================"
+  read -r -p "Select a deployment mode [1-2]: " mode_choice
+
+  case "$mode_choice" in
+    1) show_direct_menu ;;
+    2) show_docker_menu ;;
+    *) echo "Invalid choice."; exit 1 ;;
+  esac
+}
+
+show_deployment_menu
