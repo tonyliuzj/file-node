@@ -46,6 +46,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useTurnstileClearance } from '@/components/turnstile-clearance-context';
 import {
   Table,
   TableBody,
@@ -54,6 +55,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { TURNSTILE_CLEARANCE_HEADER } from '@/lib/turnstile-shared';
 import { cn } from '@/lib/utils';
 
 type Entry = {
@@ -70,6 +72,13 @@ type Backend = {
   name: string;
   scannedAt?: string | null;
   fileCount?: number;
+};
+
+type SidebarContentProps = {
+  backends: Backend[];
+  backendId: number | null;
+  loadingBackends: boolean;
+  onSelectBackend: (backendId: number) => void;
 };
 
 function safeDecode(value: string) {
@@ -131,9 +140,60 @@ function fileIcon(entry: Entry) {
   return File;
 }
 
+function SidebarContent({
+  backends,
+  backendId,
+  loadingBackends,
+  onSelectBackend,
+}: SidebarContentProps) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <HardDrive className="h-4 w-4" />
+          Storage
+        </div>
+      </div>
+      <ScrollArea className="flex-1">
+        <div className="grid gap-1 p-3">
+          {loadingBackends ? (
+            <>
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+            </>
+          ) : backends.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No backends configured.
+            </div>
+          ) : (
+            backends.map((backend) => (
+              <Button
+                key={backend.id}
+                variant={backend.id === backendId ? 'secondary' : 'ghost'}
+                className="h-auto justify-start gap-3 px-3 py-2"
+                onClick={() => onSelectBackend(backend.id)}
+              >
+                <Database className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate">{backend.name}</span>
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {(backend.fileCount ?? 0).toLocaleString()} indexed
+                  </span>
+                </span>
+              </Button>
+            ))
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
 export default function ExplorerClient() {
   const router = useRouter();
   const params = useSearchParams();
+  const turnstileClearance = useTurnstileClearance();
   const backendIdParam = params.get('backendId') || '';
   const pathParam = normalizePath(params.get('path') || '/');
   const backendId = backendIdParam ? Number(backendIdParam) : null;
@@ -174,7 +234,6 @@ export default function ExplorerClient() {
 
   useEffect(() => {
     if (backendId == null || Number.isNaN(backendId)) {
-      setEntries([]);
       return;
     }
 
@@ -185,7 +244,12 @@ export default function ExplorerClient() {
       try {
         const res = await fetch(
           `/api/files/explorer?backendId=${backendId}&path=${encodeURIComponent(pathParam)}`,
-          { cache: 'no-store' }
+          {
+            cache: 'no-store',
+            headers: turnstileClearance
+              ? { [TURNSTILE_CLEARANCE_HEADER]: turnstileClearance }
+              : undefined,
+          }
         );
         if (!res.ok) throw new Error('Failed to load directory');
         const data = (await res.json()) as Entry[];
@@ -202,17 +266,15 @@ export default function ExplorerClient() {
     return () => {
       mounted = false;
     };
-  }, [backendId, pathParam]);
+  }, [backendId, pathParam, turnstileClearance]);
 
   const activeBackend = backends.find((backend) => backend.id === backendId);
   const crumbs = useMemo(() => {
     const parts = pathParam.split('/').filter(Boolean);
-    let currentPath = '';
     return parts.map((part, index) => {
-      currentPath += `/${part}`;
       return {
         label: safeDecode(part),
-        path: currentPath,
+        path: `/${parts.slice(0, index + 1).join('/')}`,
         isLast: index === parts.length - 1,
       };
     });
@@ -245,53 +307,15 @@ export default function ExplorerClient() {
     );
   };
 
-  const SidebarContent = () => (
-    <div className="flex h-full flex-col">
-      <div className="border-b px-4 py-3">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <HardDrive className="h-4 w-4" />
-          Storage
-        </div>
-      </div>
-      <ScrollArea className="flex-1">
-        <div className="grid gap-1 p-3">
-          {loadingBackends ? (
-            <>
-              <Skeleton className="h-10" />
-              <Skeleton className="h-10" />
-              <Skeleton className="h-10" />
-            </>
-          ) : backends.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-              No backends configured.
-            </div>
-          ) : (
-            backends.map((backend) => (
-              <Button
-                key={backend.id}
-                variant={backend.id === backendId ? 'secondary' : 'ghost'}
-                className="h-auto justify-start gap-3 px-3 py-2"
-                onClick={() => updateUrl(backend.id, '/')}
-              >
-                <Database className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 text-left">
-                  <span className="block truncate">{backend.name}</span>
-                  <span className="block text-xs font-normal text-muted-foreground">
-                    {(backend.fileCount ?? 0).toLocaleString()} indexed
-                  </span>
-                </span>
-              </Button>
-            ))
-          )}
-        </div>
-      </ScrollArea>
-    </div>
-  );
-
   return (
     <div className="flex h-[calc(100vh-3.5rem)] bg-background">
       <aside className="hidden w-72 shrink-0 border-r md:block">
-        <SidebarContent />
+        <SidebarContent
+          backends={backends}
+          backendId={backendId}
+          loadingBackends={loadingBackends}
+          onSelectBackend={(selectedBackendId) => updateUrl(selectedBackendId, '/')}
+        />
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -307,7 +331,12 @@ export default function ExplorerClient() {
               <SheetHeader className="sr-only">
                 <SheetTitle>Storage backends</SheetTitle>
               </SheetHeader>
-              <SidebarContent />
+              <SidebarContent
+                backends={backends}
+                backendId={backendId}
+                loadingBackends={loadingBackends}
+                onSelectBackend={(selectedBackendId) => updateUrl(selectedBackendId, '/')}
+              />
             </SheetContent>
           </Sheet>
 

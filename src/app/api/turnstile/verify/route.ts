@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  createTurnstileClearance,
   getRequestIp,
   isTurnstileRequired,
   setTurnstileClearance,
@@ -33,8 +34,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = NextResponse.json({ success: true });
-    setTurnstileClearance(response, area);
+    const clearance = createTurnstileClearance(area);
+    const response = NextResponse.json({ success: true, clearance });
+    setTurnstileClearance(response, area, clearance);
     return response;
   } catch (error) {
     console.error('Error verifying Turnstile token:', error);

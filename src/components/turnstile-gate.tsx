@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { type ReactNode, useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import TurnstileWidget from '@/components/turnstile-widget';
+import { TurnstileClearanceProvider } from '@/components/turnstile-clearance-context';
 import type { TurnstileArea } from '@/lib/turnstile';
 
 type TurnstileGateProps = {
@@ -22,6 +23,7 @@ type TurnstileGateProps = {
   siteKey: string;
   title: string;
   description: string;
+  children?: ReactNode;
 };
 
 export default function TurnstileGate({
@@ -29,9 +31,11 @@ export default function TurnstileGate({
   siteKey,
   title,
   description,
+  children,
 }: TurnstileGateProps) {
   const router = useRouter();
   const [token, setToken] = useState('');
+  const [clearance, setClearance] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleVerify = useCallback((value: string) => {
@@ -53,9 +57,19 @@ export default function TurnstileGate({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ area, token }),
       });
-      const data = await response.json();
+      const data = (await response.json()) as {
+        success?: boolean;
+        clearance?: unknown;
+        error?: string;
+      };
       if (!response.ok) {
         throw new Error(data.error || 'Verification failed');
+      }
+
+      if (children && typeof data.clearance === 'string') {
+        setClearance(data.clearance);
+        setLoading(false);
+        return;
       }
 
       router.refresh();
@@ -65,6 +79,14 @@ export default function TurnstileGate({
       setLoading(false);
     }
   };
+
+  if (children && clearance) {
+    return (
+      <TurnstileClearanceProvider value={clearance}>
+        {children}
+      </TurnstileClearanceProvider>
+    );
+  }
 
   return (
     <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center px-4 py-10">

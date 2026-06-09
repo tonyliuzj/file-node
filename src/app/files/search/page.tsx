@@ -10,19 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function SearchPage() {
   const turnstile = getTurnstileSettings();
   const hasClearance = await hasTurnstileClearance('search');
-
-  if (!hasClearance) {
-    return (
-      <TurnstileGate
-        area="search"
-        siteKey={turnstile.siteKey}
-        title="Verify to search"
-        description="Complete Turnstile verification to access file search."
-      />
-    );
-  }
-
-  return (
+  const content = (
     <Suspense fallback={
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6">
         <Card>
@@ -39,4 +27,30 @@ export default async function SearchPage() {
       <SearchPageClient />
     </Suspense>
   );
+
+  if (!hasClearance) {
+    if (turnstile.clearanceMinutes === 0) {
+      return (
+        <TurnstileGate
+          area="search"
+          siteKey={turnstile.siteKey}
+          title="Verify to search"
+          description="Complete Turnstile verification to access file search."
+        >
+          {content}
+        </TurnstileGate>
+      );
+    }
+
+    return (
+      <TurnstileGate
+        area="search"
+        siteKey={turnstile.siteKey}
+        title="Verify to search"
+        description="Complete Turnstile verification to access file search."
+      />
+    );
+  }
+
+  return content;
 }

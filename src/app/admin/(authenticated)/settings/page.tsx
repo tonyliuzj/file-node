@@ -31,6 +31,7 @@ type TurnstileSettings = {
   requireBrowse: boolean;
   requireSearch: boolean;
   requireAdminLogin: boolean;
+  clearanceMinutes: number;
   configured: boolean;
 };
 
@@ -40,6 +41,7 @@ const emptyTurnstileSettings: TurnstileSettings = {
   requireBrowse: false,
   requireSearch: false,
   requireAdminLogin: false,
+  clearanceMinutes: 0,
   configured: false,
 };
 
@@ -154,6 +156,7 @@ export default function SettingsPage() {
             requireBrowse: turnstile.requireBrowse,
             requireSearch: turnstile.requireSearch,
             requireAdminLogin: turnstile.requireAdminLogin,
+            clearanceMinutes: turnstile.clearanceMinutes,
           },
         }),
       });
@@ -182,6 +185,8 @@ export default function SettingsPage() {
   ) => {
     setTurnstile((current) => ({ ...current, [key]: value }));
   };
+  const publicTurnstileEnabled =
+    turnstile.requireBrowse || turnstile.requireSearch;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-6">
@@ -335,6 +340,40 @@ export default function SettingsPage() {
                   </Button>
                 )}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="turnstileClearanceMinutes">
+                Validation time
+              </Label>
+              <div className="flex items-center gap-3">
+                <Input
+                  id="turnstileClearanceMinutes"
+                  type="number"
+                  min={0}
+                  max={1440}
+                  step={1}
+                  value={turnstile.clearanceMinutes}
+                  onChange={(event) => {
+                    const value = event.target.valueAsNumber;
+                    setTurnstile({
+                      ...turnstile,
+                      clearanceMinutes: Number.isFinite(value) ? value : 0,
+                    });
+                  }}
+                  disabled={
+                    turnstileLoading ||
+                    turnstileSaving ||
+                    !publicTurnstileEnabled
+                  }
+                  className="max-w-36"
+                />
+                <span className="text-sm text-muted-foreground">minutes</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Used only when Browse or Search protection is enabled. Set 0 to
+                validate on every new visit.
+              </p>
             </div>
 
             <Separator />

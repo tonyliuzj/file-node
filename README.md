@@ -150,7 +150,9 @@ Cloudflare Turnstile is optional. After signing in, open `/admin/settings` to
 store the site key and secret key, then choose whether browse, search, and admin
 sign-in require verification. Turnstile secret keys are encrypted at rest with
 the same credential protection used for backend passwords. Successful public
-verifications set a 12-hour HTTP-only clearance cookie for that area.
+verifications are not remembered by default. The validation time defaults to 0
+minutes, which requires verification on each new visit. Set a positive
+validation time to remember browse/search verification for that many minutes.
 
 ## Usage
 
@@ -181,7 +183,7 @@ verifications set a 12-hour HTTP-only clearance cookie for that area.
 * **`POST /api/setup`**
   Creates the first admin user while setup is available.
 * **`POST /api/turnstile/verify`**
-  Verifies a Turnstile token for browse, search, or admin login and sets a clearance cookie.
+  Verifies a Turnstile token for browse or search and returns a clearance. A cookie is set only when validation time is greater than 0.
 * **`GET /api/files/search?q=`**
   Public: search for files by name across all backends. May require Turnstile verification if enabled.
 * **`GET /api/files/explorer?backendId=&path=`**

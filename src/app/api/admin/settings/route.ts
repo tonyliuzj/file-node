@@ -37,6 +37,7 @@ export async function PATCH(req: NextRequest) {
         requireBrowse?: unknown;
         requireSearch?: unknown;
         requireAdminLogin?: unknown;
+        clearanceMinutes?: unknown;
       };
     };
     const turnstile = body.turnstile || {};
@@ -61,6 +62,10 @@ export async function PATCH(req: NextRequest) {
       typeof turnstile.requireAdminLogin === 'boolean'
         ? turnstile.requireAdminLogin
         : currentSettings.requireAdminLogin;
+    const clearanceMinutes =
+      typeof turnstile.clearanceMinutes === 'number'
+        ? turnstile.clearanceMinutes
+        : currentSettings.clearanceMinutes;
     const hasSecretAfterSave = clearSecretKey
       ? Boolean(secretKey)
       : Boolean(secretKey || currentSettings.hasSecretKey);
@@ -92,6 +97,10 @@ export async function PATCH(req: NextRequest) {
       requireAdminLogin:
         typeof turnstile.requireAdminLogin === 'boolean'
           ? requireAdminLogin
+          : undefined,
+      clearanceMinutes:
+        typeof turnstile.clearanceMinutes === 'number'
+          ? clearanceMinutes
           : undefined,
     });
 

@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { getPersistentSecret, protectSecret, revealSecret } from '@/lib/credentials';
+import { TURNSTILE_CLEARANCE_HEADER } from '@/lib/turnstile-shared';
 
 export type TurnstileArea = 'browse' | 'search' | 'adminLogin';
 
@@ -12,6 +13,7 @@ export type TurnstileSettings = {
   requireBrowse: boolean;
   requireSearch: boolean;
   requireAdminLogin: boolean;
+  clearanceMinutes: number;
   configured: boolean;
 };
 
@@ -26,11 +28,17 @@ const SETTING_KEYS = {
   requireBrowse: 'turnstile.requireBrowse',
   requireSearch: 'turnstile.requireSearch',
   requireAdminLogin: 'turnstile.requireAdminLogin',
+  clearanceMinutes: 'turnstile.clearanceMinutes',
 } as const;
 
 const CLEARANCE_COOKIE_PREFIX = 'file_node_turnstile_';
-const CLEARANCE_MAX_AGE_SECONDS = 60 * 60 * 12;
-const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const DEFAULT_CLEARANCE_MINUTES = 0;
+const MIN_CLEARANCE_MINUTES = 0;
+const MAX_CLEARANCE_MINUTES = 60 * 24;
+const CLEARANCE_CLOCK_SKEW_MS = 10 * 1000;
+const TRANSIENT_CLEARANCE_SECONDS = 60 * 60;
+const TURNSTILE_VERIFY_URL =
+  'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
 function getSettingsMap() {
   const rows = db
@@ -61,6 +69,15 @@ function boolToSetting(value: boolean) {
   return value ? '1' : '0';
 }
 
+function normalizeClearanceMinutes(value: unknown) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return DEFAULT_CLEARANCE_MINUTES;
+  return Math.min(
+    MAX_CLEARANCE_MINUTES,
+    Math.max(MIN_CLEARANCE_MINUTES, Math.floor(minutes))
+  );
+}
+
 export function getTurnstileSecretKey() {
   const row = db
     .prepare('SELECT value FROM settings WHERE key = ?')
@@ -80,6 +97,9 @@ export function getTurnstileSettings(): TurnstileSettings {
     requireBrowse: boolFromSetting(settings.get(SETTING_KEYS.requireBrowse)),
     requireSearch: boolFromSetting(settings.get(SETTING_KEYS.requireSearch)),
     requireAdminLogin: boolFromSetting(settings.get(SETTING_KEYS.requireAdminLogin)),
+    clearanceMinutes: normalizeClearanceMinutes(
+      settings.get(SETTING_KEYS.clearanceMinutes)
+    ),
     configured: Boolean(siteKey && hasSecretKey),
   };
 }
@@ -91,9 +111,12 @@ export function updateTurnstileSettings(input: {
   requireBrowse?: boolean;
   requireSearch?: boolean;
   requireAdminLogin?: boolean;
+  clearanceMinutes?: number;
 }) {
-  const siteKey = typeof input.siteKey === 'string' ? input.siteKey.trim() : undefined;
-  const secretKey = typeof input.secretKey === 'string' ? input.secretKey.trim() : undefined;
+  const siteKey =
+    typeof input.siteKey === 'string' ? input.siteKey.trim() : undefined;
+  const secretKey =
+    typeof input.secretKey === 'string' ? input.secretKey.trim() : undefined;
 
   if (siteKey !== undefined) {
     setSetting(SETTING_KEYS.siteKey, siteKey || null);
@@ -115,6 +138,12 @@ export function updateTurnstileSettings(input: {
     setSetting(
       SETTING_KEYS.requireAdminLogin,
       boolToSetting(input.requireAdminLogin)
+    );
+  }
+  if (typeof input.clearanceMinutes === 'number') {
+    setSetting(
+      SETTING_KEYS.clearanceMinutes,
+      String(normalizeClearanceMinutes(input.clearanceMinutes))
     );
   }
 }
@@ -139,16 +168,37 @@ function signClearance(area: TurnstileArea, expiresAt: number) {
     .digest('base64url');
 }
 
-function createClearanceValue(area: TurnstileArea) {
-  const expiresAt = Date.now() + CLEARANCE_MAX_AGE_SECONDS * 1000;
+function getRememberedClearanceSeconds(settings = getTurnstileSettings()) {
+  return settings.clearanceMinutes * 60;
+}
+
+function getValidationClearanceSeconds(settings = getTurnstileSettings()) {
+  const rememberedSeconds = getRememberedClearanceSeconds(settings);
+  return rememberedSeconds > 0 ? rememberedSeconds : TRANSIENT_CLEARANCE_SECONDS;
+}
+
+function createClearanceValue(area: TurnstileArea, maxAgeSeconds: number) {
+  const expiresAt = Date.now() + maxAgeSeconds * 1000;
   return `${expiresAt}.${signClearance(area, expiresAt)}`;
 }
 
-function isClearanceValueValid(area: TurnstileArea, value: string | undefined) {
+function isClearanceValueValid(
+  area: TurnstileArea,
+  value: string | undefined,
+  maxAgeSeconds: number
+) {
   if (!value) return false;
   const [expiresAtRaw, signature] = value.split('.');
   const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || !signature || expiresAt < Date.now()) {
+  const now = Date.now();
+  const maxAgeMs = maxAgeSeconds * 1000;
+  if (
+    maxAgeSeconds <= 0 ||
+    !Number.isFinite(expiresAt) ||
+    !signature ||
+    expiresAt < now ||
+    expiresAt > now + maxAgeMs + CLEARANCE_CLOCK_SKEW_MS
+  ) {
     return false;
   }
 
@@ -162,28 +212,68 @@ function isClearanceValueValid(area: TurnstileArea, value: string | undefined) {
 
 export async function hasTurnstileClearance(area: TurnstileArea) {
   if (!isTurnstileRequired(area)) return true;
+  const rememberedSeconds = getRememberedClearanceSeconds();
+  if (rememberedSeconds <= 0) return false;
   const cookieStore = await cookies();
   return isClearanceValueValid(
     area,
-    cookieStore.get(getClearanceCookieName(area))?.value
+    cookieStore.get(getClearanceCookieName(area))?.value,
+    rememberedSeconds
   );
 }
 
-export function requestHasTurnstileClearance(request: NextRequest, area: TurnstileArea) {
+export function requestHasTurnstileClearance(
+  request: NextRequest,
+  area: TurnstileArea
+) {
   if (!isTurnstileRequired(area)) return true;
+  const settings = getTurnstileSettings();
+  const rememberedSeconds = getRememberedClearanceSeconds(settings);
+  const headerClearance = request.headers.get(TURNSTILE_CLEARANCE_HEADER);
+
+  if (
+    isClearanceValueValid(
+      area,
+      headerClearance || undefined,
+      getValidationClearanceSeconds(settings)
+    )
+  ) {
+    return true;
+  }
+
+  if (rememberedSeconds <= 0) return false;
+
   return isClearanceValueValid(
     area,
-    request.cookies.get(getClearanceCookieName(area))?.value
+    request.cookies.get(getClearanceCookieName(area))?.value,
+    rememberedSeconds
   );
 }
 
-export function setTurnstileClearance(response: NextResponse, area: TurnstileArea) {
-  response.cookies.set(getClearanceCookieName(area), createClearanceValue(area), {
+export function createTurnstileClearance(area: TurnstileArea) {
+  return createClearanceValue(area, getValidationClearanceSeconds());
+}
+
+export function setTurnstileClearance(
+  response: NextResponse,
+  area: TurnstileArea,
+  value: string
+) {
+  const maxAge = getRememberedClearanceSeconds();
+  if (maxAge <= 0) {
+    response.cookies.set(getClearanceCookieName(area), '', {
+      path: '/',
+      maxAge: 0,
+    });
+    return;
+  }
+
+  response.cookies.set(getClearanceCookieName(area), value, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
-    maxAge: CLEARANCE_MAX_AGE_SECONDS,
+    maxAge,
   });
 }
 

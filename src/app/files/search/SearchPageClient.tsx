@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useTurnstileClearance } from '@/components/turnstile-clearance-context';
 import {
   Card,
   CardContent,
@@ -37,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { TURNSTILE_CLEARANCE_HEADER } from '@/lib/turnstile-shared';
 import { cn } from '@/lib/utils';
 
 type SearchResult = {
@@ -99,6 +101,7 @@ function fileIcon(result: SearchResult) {
 
 export default function SearchPageClient() {
   const searchParams = useSearchParams();
+  const turnstileClearance = useTurnstileClearance();
   const q = searchParams.get('q') || '';
   const [backends, setBackends] = useState<Backend[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -137,7 +140,12 @@ export default function SearchPageClient() {
       try {
         const resultsRes = await fetch(
           `/api/files/search?q=${encodeURIComponent(q)}`,
-          { cache: 'no-store' }
+          {
+            cache: 'no-store',
+            headers: turnstileClearance
+              ? { [TURNSTILE_CLEARANCE_HEADER]: turnstileClearance }
+              : undefined,
+          }
         );
         if (!resultsRes.ok) throw new Error('Search failed');
         const data = (await resultsRes.json()) as SearchResult[];
@@ -156,7 +164,7 @@ export default function SearchPageClient() {
     return () => {
       mounted = false;
     };
-  }, [q]);
+  }, [q, turnstileClearance]);
 
   const backendMap = useMemo(() => {
     return new Map(backends.map((backend) => [backend.id, backend]));

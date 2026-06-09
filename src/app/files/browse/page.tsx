@@ -9,6 +9,19 @@ export default async function ExplorerPage() {
   const hasClearance = await hasTurnstileClearance('browse');
 
   if (!hasClearance) {
+    if (turnstile.clearanceMinutes === 0) {
+      return (
+        <TurnstileGate
+          area="browse"
+          siteKey={turnstile.siteKey}
+          title="Verify to browse"
+          description="Complete Turnstile verification to access the file browser."
+        >
+          <ExplorerClient />
+        </TurnstileGate>
+      );
+    }
+
     return (
       <TurnstileGate
         area="browse"
