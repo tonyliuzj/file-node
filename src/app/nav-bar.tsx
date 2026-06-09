@@ -2,11 +2,29 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { usePathname, useSearchParams, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { Menu, Moon, Sun, ArrowLeft, Search, Folder, Library } from 'lucide-react';
+import {
+  ArrowLeft,
+  FolderOpen,
+  HardDrive,
+  Library,
+  Menu,
+  Monitor,
+  Moon,
+  Search,
+  Settings,
+  Shield,
+  Sun,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   NavigationMenu,
   NavigationMenuItem,
@@ -21,145 +39,169 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+
+const navItems = [
+  { href: '/', label: 'Dashboard', icon: Library },
+  { href: '/files/browse', label: 'Browse', icon: FolderOpen },
+  { href: '/files/search', label: 'Search', icon: Search },
+  { href: '/admin/backends', label: 'Admin', icon: Shield },
+];
+
+function decodeFileName(value: string | null) {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value.split('/').pop() || value);
+  } catch {
+    return value.split('/').pop() || value;
+  }
+}
 
 export default function NavBar() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isViewer = pathname.match(/^\/files\/[^/]+$/) && !pathname.includes('/search') && !pathname.includes('/browse');
-  const fileName = isViewer
-    ? searchParams.get('path')?.split('/').pop()
-    : null;
-
   const { setTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
-  const isActive = (path: string) => pathname.startsWith(path);
+  const isViewer =
+    /^\/files\/[^/]+$/.test(pathname) &&
+    !pathname.includes('/search') &&
+    !pathname.includes('/browse');
+  const fileName = isViewer
+    ? decodeFileName(searchParams.get('path'))
+    : null;
+
+  const isActive = (href: string) => {
+    if (href === '/') return pathname === '/';
+    return pathname.startsWith(href);
+  };
 
   return (
-    <div className="fixed top-0 left-0 w-full z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-16 items-center px-4 max-w-7xl mx-auto">
-        
-        {/* Left Side: Logo or Back Button */}
-        <div className="flex items-center flex-1 gap-4">
-          {isViewer ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => router.back()}
-              className="gap-2"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="md:hidden">
-                    <Menu className="h-5 w-5" />
-                    <span className="sr-only">Toggle menu</span>
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left">
-                  <SheetHeader>
-                    <SheetTitle>File Library</SheetTitle>
-                  </SheetHeader>
-                  <div className="flex flex-col gap-4 py-4">
-                    <Link
-                      href="/files/search"
+    <header className="fixed inset-x-0 top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 md:px-6">
+        {isViewer ? (
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+        ) : (
+          <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="md:hidden">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Open navigation</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-0">
+              <SheetHeader className="border-b px-4 py-3 text-left">
+                <SheetTitle className="flex items-center gap-2">
+                  <Library className="h-5 w-5 text-primary" />
+                  File Node
+                </SheetTitle>
+              </SheetHeader>
+              <nav className="grid gap-1 p-3">
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Button
+                      key={item.href}
+                      asChild
+                      variant={isActive(item.href) ? 'secondary' : 'ghost'}
+                      className="justify-start"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={cn(
-                        "flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary",
-                        isActive('/files/search') ? "text-primary" : "text-muted-foreground"
-                      )}
                     >
-                      <Search className="h-4 w-4" />
-                      Search
-                    </Link>
-                    <Link
-                      href="/files/browse"
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={cn(
-                        "flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary",
-                        isActive('/files/browse') ? "text-primary" : "text-muted-foreground"
-                      )}
-                    >
-                      <Folder className="h-4 w-4" />
-                      Browse
-                    </Link>
-                  </div>
-                </SheetContent>
-              </Sheet>
-              
-              <Link href="/" className="flex items-center gap-2 font-bold text-xl mr-6">
-                <Library className="h-6 w-6 text-primary" />
-                <span className="hidden sm:inline-block">File Library</span>
-              </Link>
+                      <Link href={item.href}>
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    </Button>
+                  );
+                })}
+              </nav>
+            </SheetContent>
+          </Sheet>
+        )}
+
+        <Link
+          href="/"
+          className="flex min-w-0 items-center gap-2 font-semibold"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-md border bg-card">
+            <HardDrive className="h-4 w-4 text-primary" />
+          </span>
+          <span className="hidden sm:inline">File Node</span>
+        </Link>
+
+        {isViewer && fileName ? (
+          <>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="min-w-0 flex-1 truncate text-sm font-medium">
+              {fileName}
             </div>
-          )}
-
-          {/* Viewer Title */}
-          {isViewer && fileName && (
-            <h1 className="text-sm md:text-base font-medium truncate max-w-[200px] md:max-w-md" title={decodeURIComponent(fileName)}>
-              {decodeURIComponent(fileName)}
-            </h1>
-          )}
-        </div>
-
-        {/* Desktop Navigation */}
-        {!isViewer && (
-          <NavigationMenu className="hidden md:flex mx-6">
+          </>
+        ) : (
+          <NavigationMenu className="hidden md:flex">
             <NavigationMenuList>
-              <NavigationMenuItem>
-                <NavigationMenuLink asChild className={cn(navigationMenuTriggerStyle(), isActive('/files/search') && "bg-accent text-accent-foreground")}>
-                  <Link href="/files/search">
-                    Search
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-              <NavigationMenuItem>
-                <NavigationMenuLink asChild className={cn(navigationMenuTriggerStyle(), isActive('/files/browse') && "bg-accent text-accent-foreground")}>
-                  <Link href="/files/browse">
-                    Browse
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
+              {navItems.slice(1).map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavigationMenuItem key={item.href}>
+                    <NavigationMenuLink
+                      asChild
+                      className={cn(
+                        navigationMenuTriggerStyle(),
+                        'gap-2',
+                        isActive(item.href) && 'bg-accent text-accent-foreground'
+                      )}
+                    >
+                      <Link href={item.href}>
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    </NavigationMenuLink>
+                  </NavigationMenuItem>
+                );
+              })}
             </NavigationMenuList>
           </NavigationMenu>
         )}
 
-        {/* Right Side: Theme Toggle */}
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          {!isViewer && (
+            <Button asChild variant="outline" size="sm" className="hidden sm:flex">
+              <Link href="/admin/backends">
+                <Settings className="h-4 w-4" />
+                Backends
+              </Link>
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon">
-                <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-                <span className="sr-only">Toggle theme</span>
+                <Sun className="h-[1.15rem] w-[1.15rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+                <Moon className="absolute h-[1.15rem] w-[1.15rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+                <span className="sr-only">Theme</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setTheme("light")}>
+              <DropdownMenuItem onClick={() => setTheme('light')}>
+                <Sun className="mr-2 h-4 w-4" />
                 Light
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("dark")}>
+              <DropdownMenuItem onClick={() => setTheme('dark')}>
+                <Moon className="mr-2 h-4 w-4" />
                 Dark
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setTheme("system")}>
+              <DropdownMenuItem onClick={() => setTheme('system')}>
+                <Monitor className="mr-2 h-4 w-4" />
                 System
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
-    </div>
+    </header>
   );
 }

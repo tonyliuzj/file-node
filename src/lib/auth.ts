@@ -3,6 +3,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import type { NextAuthOptions } from 'next-auth';
 import db from '@/utils/db';
 import bcrypt from 'bcryptjs';
+import { getPersistentSecret } from '@/lib/credentials';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -17,24 +18,18 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const user = db.prepare('SELECT * FROM users WHERE username = ?')
+        const user = db.prepare('SELECT id, username, password FROM users WHERE username = ?')
           .get(credentials.username) as { id: number; username: string; password: string } | undefined;
 
         if (!user) {
           return null;
         }
 
-        // Check if password is hashed (bcrypt hashes start with $2a$, $2b$, or $2y$)
-        const isHashed = user.password.startsWith('$2');
-
-        let isPasswordValid = false;
-        if (isHashed) {
-          // Compare with bcrypt
-          isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-        } else {
-          // Plain text comparison (for backwards compatibility during migration)
-          isPasswordValid = credentials.password === user.password;
+        if (!user.password.startsWith('$2')) {
+          return null;
         }
+
+        const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
 
         if (isPasswordValid) {
           return {
@@ -61,5 +56,5 @@ export const authOptions: NextAuthOptions = {
     },
   },
   session: { strategy: 'jwt' },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: getPersistentSecret(),
 };

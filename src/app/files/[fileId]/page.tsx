@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Loader2, FileQuestion } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import PdfViewerClient from './PdfViewerClient';
 import TextViewerClient from './TextViewerClient';
 import AudioViewerClient from './AudioViewerClient';
@@ -27,13 +28,13 @@ function ViewerContent() {
     viewerElement = <PdfViewerClient fileUrl={src} />;
   } else if (ext && ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
     viewerElement = (
-      <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-900">
+      <div className="flex h-full items-center justify-center bg-muted/40 p-4">
         <Image
           src={src}
           alt={fileName}
           width={1200}
           height={800}
-          className="w-full h-full object-contain"
+          className="h-full w-full object-contain"
           unoptimized
         />
       </div>
@@ -49,16 +50,22 @@ function ViewerContent() {
   } else {
     viewerElement = (
       <div className="flex flex-col items-center justify-center h-full bg-muted/40 p-4 text-center">
-        <div className="mb-6 p-8 bg-card rounded-xl shadow-sm border">
-          <FileQuestion className="h-16 w-16 mx-auto text-muted-foreground mb-4 opacity-50" />
-          <p className="text-lg text-card-foreground mb-2 font-medium">Preview not available</p>
-          <p className="text-sm text-muted-foreground mb-6">This file type cannot be previewed in the browser.</p>
-          <Button asChild>
-            <a href={src} download={fileName}>
-                Download {fileName}
-            </a>
-          </Button>
-        </div>
+        <Card className="w-full max-w-md shadow-sm">
+          <CardContent className="p-8">
+            <FileQuestion className="mx-auto mb-4 h-14 w-14 text-muted-foreground" />
+            <p className="mb-2 text-lg font-medium text-card-foreground">
+              Preview not available
+            </p>
+            <p className="mb-6 text-sm text-muted-foreground">
+              This file type cannot be previewed in the browser.
+            </p>
+            <Button asChild>
+              <a href={src} download={fileName}>
+                Download
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -72,7 +79,7 @@ function ViewerContent() {
 
 export default function ViewerPage() {
   return (
-    <div className="pt-16 flex flex-col h-screen">
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
       <Suspense fallback={
         <div className="flex items-center justify-center h-full bg-background">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />

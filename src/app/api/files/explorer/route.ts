@@ -1,6 +1,7 @@
 // src/app/api/files/explorer/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
+import { normalizeVirtualPath, safeDecodeURIComponent } from '@/lib/security';
 
 export async function GET(request: NextRequest) {
   const url = request.nextUrl;
@@ -14,22 +15,24 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const dirPathParam = url.searchParams.get('path') || '/';
-  let parent = dirPathParam;
-  if (!parent.startsWith('/')) parent = '/' + parent;
+  let parent = normalizeVirtualPath(url.searchParams.get('path') || '/');
   if (!parent.endsWith('/')) parent = parent + '/';
 
   const stmt = db.prepare(`
-    SELECT id, path, isDirectory
+    SELECT id, path, name, isDirectory, size, modifiedAt
       FROM files
      WHERE backendId = ?
        AND path LIKE ?
+       ESCAPE '\\'
     ORDER BY isDirectory DESC, name
   `);
   const allRows = stmt.all(backendId, `${parent}%`) as {
     id: number;
     path: string;
+    name: string;
     isDirectory: number;
+    size: number | null;
+    modifiedAt: string | null;
   }[];
 
   const direct = allRows.filter((row) => {
@@ -41,16 +44,17 @@ export async function GET(request: NextRequest) {
 
   const entries = direct.map((row) => {
     const isDir = row.isDirectory === 1;
-    let name = row.path.slice(parent.length);
-    if (isDir && name.endsWith('/')) name = name.slice(0, -1);
-    
-    name = decodeURIComponent(name);
+    const name = row.name || safeDecodeURIComponent(
+      row.path.slice(parent.length).replace(/\/$/, '')
+    );
 
     return {
       id: row.id,
       path: row.path,
       name,
       isDirectory: isDir,
+      size: row.size,
+      modifiedAt: row.modifiedAt,
     };
   });
 

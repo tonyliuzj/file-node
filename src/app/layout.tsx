@@ -8,7 +8,8 @@ import { cn } from '@/lib/utils'
 const inter = Inter({ subsets: ['latin'], variable: "--font-sans" })
 
 export const metadata = {
-  title: 'File Library',
+  title: 'File Node',
+  description: 'Self-hosted indexed file explorer',
 }
 
 export default function RootLayout({
@@ -32,7 +33,7 @@ export default function RootLayout({
           <Suspense fallback={null}>
             <NavBar />
           </Suspense>
-          <main className="pt-16">{children}</main>
+          <main className="pt-14">{children}</main>
         </ThemeProvider>
       </body>
     </html>

@@ -1,269 +1,518 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { Folder, File, Film, Image as ImageIcon, Database, ArrowLeft, Loader2, HardDrive } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  AlertCircle,
+  ArrowLeft,
+  Database,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileText,
+  FileVideo,
+  Folder,
+  HardDrive,
+  Search,
+} from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbSeparator, BreadcrumbPage } from '@/components/ui/breadcrumb';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 type Entry = {
   id: number;
   name: string;
   path: string;
   isDirectory: boolean;
+  size: number | null;
+  modifiedAt: string | null;
 };
+
+type Backend = {
+  id: number;
+  name: string;
+  scannedAt?: string | null;
+  fileCount?: number;
+};
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizePath(value: string) {
+  let path = value || '/';
+  if (!path.startsWith('/')) path = `/${path}`;
+  path = path.replace(/\/{2,}/g, '/');
+  return path;
+}
+
+function formatBytes(value: number | null) {
+  if (!value) return 'Unknown';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return 'Not scanned';
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+function fileIcon(entry: Entry) {
+  if (entry.isDirectory) return Folder;
+  const ext = entry.name.split('.').pop()?.toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext || '')) {
+    return FileImage;
+  }
+  if (['mp4', 'webm', 'mov', 'mkv', 'ogg'].includes(ext || '')) {
+    return FileVideo;
+  }
+  if (['mp3', 'wav', 'flac', 'aac'].includes(ext || '')) {
+    return FileAudio;
+  }
+  if (['zip', 'tar', 'gz', '7z', 'rar'].includes(ext || '')) {
+    return FileArchive;
+  }
+  if (['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'xml', 'yaml'].includes(ext || '')) {
+    return FileCode;
+  }
+  if (['md', 'markdown', 'txt', 'csv', 'pdf'].includes(ext || '')) {
+    return FileText;
+  }
+  return File;
+}
 
 export default function ExplorerClient() {
   const router = useRouter();
   const params = useSearchParams();
   const backendIdParam = params.get('backendId') || '';
-  const pathParam = params.get('path') || '/';
+  const pathParam = normalizePath(params.get('path') || '/');
   const backendId = backendIdParam ? Number(backendIdParam) : null;
 
-  const [backends, setBackends] = useState<{ id: number; name: string }[]>([]);
+  const [backends, setBackends] = useState<Backend[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingBackends, setLoadingBackends] = useState(true);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+  const [error, setError] = useState('');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
-    fetch('/api/backends')
-      .then(r => r.json())
-      .then(setBackends);
-  }, []);
+    let mounted = true;
+
+    async function loadBackends() {
+      setLoadingBackends(true);
+      try {
+        const res = await fetch('/api/backends', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load backends');
+        const data = (await res.json()) as Backend[];
+        if (!mounted) return;
+        setBackends(data);
+
+        if (!backendIdParam && data[0]) {
+          router.replace(`/files/browse?backendId=${data[0].id}&path=%2F`);
+        }
+      } catch {
+        if (mounted) setError('Unable to load storage backends');
+      } finally {
+        if (mounted) setLoadingBackends(false);
+      }
+    }
+
+    loadBackends();
+    return () => {
+      mounted = false;
+    };
+  }, [backendIdParam, router]);
 
   useEffect(() => {
-    if (backendId != null) {
-      setLoading(true);
+    if (backendId == null || Number.isNaN(backendId)) {
       setEntries([]);
-      fetch(`/api/files/explorer?backendId=${backendId}&path=${encodeURIComponent(pathParam)}`)
-        .then(r => r.json())
-        .then(data => {
-          if (Array.isArray(data)) {
-            // Sort: Directories first, then files
-            data.sort((a, b) => {
-              if (a.isDirectory && !b.isDirectory) return -1;
-              if (!a.isDirectory && b.isDirectory) return 1;
-              return a.name.localeCompare(b.name);
-            });
-            setEntries(data);
-          }
-        })
-        .finally(() => setLoading(false));
+      return;
     }
+
+    let mounted = true;
+    async function loadEntries() {
+      setLoadingEntries(true);
+      setError('');
+      setEntries([]);
+      try {
+        const res = await fetch(
+          `/api/files/explorer?backendId=${backendId}&path=${encodeURIComponent(pathParam)}`,
+          { cache: 'no-store' }
+        );
+        if (!res.ok) throw new Error('Failed to load directory');
+        const data = (await res.json()) as Entry[];
+        if (!mounted) return;
+        setEntries(data);
+      } catch {
+        if (mounted) setError('Unable to load this directory from the index');
+      } finally {
+        if (mounted) setLoadingEntries(false);
+      }
+    }
+
+    loadEntries();
+    return () => {
+      mounted = false;
+    };
   }, [backendId, pathParam]);
 
+  const activeBackend = backends.find((backend) => backend.id === backendId);
+  const crumbs = useMemo(() => {
+    const parts = pathParam.split('/').filter(Boolean);
+    let currentPath = '';
+    return parts.map((part, index) => {
+      currentPath += `/${part}`;
+      return {
+        label: safeDecode(part),
+        path: currentPath,
+        isLast: index === parts.length - 1,
+      };
+    });
+  }, [pathParam]);
+
   const updateUrl = (newBackend: number | null, newPath: string) => {
+    const normalizedPath = normalizePath(newPath);
     const url = newBackend
-      ? `/files/browse?backendId=${newBackend}&path=${encodeURIComponent(newPath)}`
+      ? `/files/browse?backendId=${newBackend}&path=${encodeURIComponent(normalizedPath)}`
       : '/files/browse';
     router.push(url);
     setMobileSidebarOpen(false);
   };
 
-  const getBreadcrumbs = () => {
+  const openParent = () => {
     const parts = pathParam.split('/').filter(Boolean);
-    let currentPath = '';
-    return parts.map((part, index) => {
-      currentPath += '/' + part;
-      return {
-        name: decodeURIComponent(part),
-        path: currentPath,
-        isLast: index === parts.length - 1
-      };
-    });
+    parts.pop();
+    updateUrl(backendId, parts.length ? `/${parts.join('/')}` : '/');
   };
 
-  const getFileIcon = (isDirectory: boolean, name: string) => {
-    if (isDirectory) {
-      return <Folder className="h-8 w-8 text-yellow-500" />;
+  const openEntry = (entry: Entry) => {
+    if (!backendId) return;
+    if (entry.isDirectory) {
+      updateUrl(backendId, entry.path.endsWith('/') ? entry.path : `${entry.path}/`);
+      return;
     }
-    const ext = name.split('.').pop()?.toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
-      return <ImageIcon className="h-8 w-8 text-purple-500" />;
-    }
-    if (['mp4', 'webm', 'mov'].includes(ext || '')) {
-      return <Film className="h-8 w-8 text-red-500" />;
-    }
-    if (['pdf'].includes(ext || '')) {
-        return <File className="h-8 w-8 text-red-600" />;
-    }
-    return <File className="h-8 w-8 text-muted-foreground" />;
+
+    router.push(
+      `/files/${entry.id}?backendId=${backendId}&path=${encodeURIComponent(entry.path)}`
+    );
   };
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full py-4">
-      <div className="px-4 mb-4">
-        <h2 className="text-lg font-semibold tracking-tight">Storage</h2>
+    <div className="flex h-full flex-col">
+      <div className="border-b px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <HardDrive className="h-4 w-4" />
+          Storage
+        </div>
       </div>
-      <ScrollArea className="flex-1 px-2">
-        <div className="space-y-1">
-            {backends.length === 0 && (
-                <div className="text-sm text-muted-foreground text-center py-4">No backends configured</div>
-            )}
-            {backends.map(b => (
-            <Button
-                key={b.id}
-                variant={b.id === backendId ? "secondary" : "ghost"}
-                className="w-full justify-start font-normal"
-                onClick={() => updateUrl(b.id, '/')}
-            >
-                <HardDrive className="mr-2 h-4 w-4" />
-                {b.name}
-            </Button>
-            ))}
+      <ScrollArea className="flex-1">
+        <div className="grid gap-1 p-3">
+          {loadingBackends ? (
+            <>
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+            </>
+          ) : backends.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No backends configured.
+            </div>
+          ) : (
+            backends.map((backend) => (
+              <Button
+                key={backend.id}
+                variant={backend.id === backendId ? 'secondary' : 'ghost'}
+                className="h-auto justify-start gap-3 px-3 py-2"
+                onClick={() => updateUrl(backend.id, '/')}
+              >
+                <Database className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate">{backend.name}</span>
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {(backend.fileCount ?? 0).toLocaleString()} indexed
+                  </span>
+                </span>
+              </Button>
+            ))
+          )}
         </div>
       </ScrollArea>
     </div>
   );
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] pt-16">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-64 flex-col border-r bg-background">
+    <div className="flex h-[calc(100vh-3.5rem)] bg-background">
+      <aside className="hidden w-72 shrink-0 border-r md:block">
         <SidebarContent />
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-background">
-        {/* Mobile Header / Sidebar Toggle */}
-        <div className="md:hidden flex items-center p-4 border-b">
-            <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-                <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" className="mr-2">
-                        <Database className="h-4 w-4" />
-                    </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-64 p-0">
-                    <SidebarContent />
-                </SheetContent>
-            </Sheet>
-            <span className="font-semibold truncate">
-                {backendId ? backends.find(b => b.id === backendId)?.name : 'Select Storage'}
-            </span>
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-16 items-center gap-3 border-b px-4">
+          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="icon" className="md:hidden">
+                <HardDrive className="h-4 w-4" />
+                <span className="sr-only">Select backend</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-0">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Storage backends</SheetTitle>
+              </SheetHeader>
+              <SidebarContent />
+            </SheetContent>
+          </Sheet>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-base font-semibold">
+                {activeBackend?.name || 'Browse files'}
+              </h1>
+              {activeBackend && (
+                <Badge variant="outline" className="hidden sm:inline-flex">
+                  {formatDate(activeBackend.scannedAt)}
+                </Badge>
+              )}
+            </div>
+            <Breadcrumb className="mt-1">
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  {backendId ? (
+                    <BreadcrumbLink
+                      className="cursor-pointer"
+                      onClick={() => updateUrl(backendId, '/')}
+                    >
+                      Root
+                    </BreadcrumbLink>
+                  ) : (
+                    <BreadcrumbPage>Root</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+                {crumbs.map((crumb) => (
+                  <React.Fragment key={crumb.path}>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      {crumb.isLast ? (
+                        <BreadcrumbPage className="max-w-40 truncate sm:max-w-72">
+                          {crumb.label}
+                        </BreadcrumbPage>
+                      ) : (
+                        <BreadcrumbLink
+                          className="max-w-32 cursor-pointer truncate sm:max-w-56"
+                          onClick={() => updateUrl(backendId, crumb.path)}
+                        >
+                          {crumb.label}
+                        </BreadcrumbLink>
+                      )}
+                    </BreadcrumbItem>
+                  </React.Fragment>
+                ))}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+
+          <Button asChild variant="outline" size="sm">
+            <Link href="/files/search">
+              <Search className="h-4 w-4" />
+              Search
+            </Link>
+          </Button>
         </div>
 
-        {backendId != null ? (
-            <>
-                {/* Breadcrumbs */}
-                <div className="flex items-center px-4 py-3 border-b bg-background/95 backdrop-blur z-10 sticky top-0">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => updateUrl(backendId, '/')}
-                        className="mr-2"
-                        title="Go to root"
-                    >
-                        <HardDrive className="h-4 w-4" />
-                    </Button>
-                    <Separator orientation="vertical" className="h-6 mx-2" />
-                    <ScrollArea className="flex-1 whitespace-nowrap">
-                        <Breadcrumb>
-                            <BreadcrumbList>
-                                <BreadcrumbItem>
-                                     <BreadcrumbLink 
-                                        onClick={() => updateUrl(backendId, '/')}
-                                        className="cursor-pointer"
-                                     >
-                                        Root
-                                     </BreadcrumbLink>
-                                </BreadcrumbItem>
-                                {getBreadcrumbs().map((crumb) => (
-                                    <React.Fragment key={crumb.path}>
-                                        <BreadcrumbSeparator />
-                                        <BreadcrumbItem>
-                                            {crumb.isLast ? (
-                                                <BreadcrumbPage>{crumb.name}</BreadcrumbPage>
-                                            ) : (
-                                                <BreadcrumbLink 
-                                                    onClick={() => updateUrl(backendId, crumb.path)}
-                                                    className="cursor-pointer"
-                                                >
-                                                    {crumb.name}
-                                                </BreadcrumbLink>
-                                            )}
-                                        </BreadcrumbItem>
-                                    </React.Fragment>
-                                ))}
-                            </BreadcrumbList>
-                        </Breadcrumb>
-                    </ScrollArea>
-                </div>
-
-                {/* File List */}
-                <ScrollArea className="flex-1 p-4">
-                    {loading ? (
-                        <div className="flex justify-center items-center h-full py-12">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                            {pathParam !== '/' && (
-                                <Card
-                                    className="cursor-pointer hover:bg-accent/50 transition-colors border-dashed"
-                                    onClick={() => {
-                                        const parts = pathParam.split('/').filter(Boolean);
-                                        parts.pop();
-                                        const parent = parts.length > 0 ? '/' + parts.join('/') : '/';
-                                        updateUrl(backendId, parent);
-                                    }}
-                                >
-                                    <CardContent className="flex flex-col items-center justify-center p-4 h-full aspect-square">
-                                        <ArrowLeft className="h-8 w-8 text-muted-foreground mb-2" />
-                                        <span className="text-sm font-medium text-muted-foreground">Back</span>
-                                    </CardContent>
-                                </Card>
-                            )}
-                            
-                            {entries.length === 0 && pathParam === '/' ? (
-                                <div className="col-span-full text-center py-12 text-muted-foreground">
-                                    Folder is empty
-                                </div>
-                            ) : (
-                                entries.map(e => (
-                                    <Card
-                                        key={e.id}
-                                        className="group cursor-pointer hover:bg-accent/50 transition-all hover:shadow-md"
-                                        onClick={() => {
-                                            if (e.isDirectory) {
-                                                const dir = e.path.endsWith('/') ? e.path : e.path + '/';
-                                                updateUrl(backendId, dir);
-                                            } else {
-                                                router.push(`/files/${e.id}?backendId=${backendId}&path=${encodeURIComponent(e.path)}`);
-                                            }
-                                        }}
-                                    >
-                                        <CardContent className="flex flex-col items-center p-4 h-full">
-                                            <div className="flex-1 flex items-center justify-center mb-3">
-                                                {getFileIcon(e.isDirectory, e.name)}
-                                            </div>
-                                            <div className="w-full text-center">
-                                                <p className="text-sm font-medium truncate w-full" title={decodeURIComponent(e.name)}>
-                                                    {decodeURIComponent(e.name)}
-                                                </p>
-                                                <p className="text-xs text-muted-foreground mt-1">
-                                                    {e.isDirectory ? 'Folder' : e.name.split('.').pop()?.toUpperCase() || 'File'}
-                                                </p>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </ScrollArea>
-            </>
-        ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-4">
-                <HardDrive className="h-16 w-16 mb-4 opacity-20" />
-                <p className="text-lg">Select a storage backend to browse files</p>
+        {error && (
+          <div className="border-b bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
+              {error}
             </div>
+          </div>
         )}
-      </main>
+
+        {!backendId || Number.isNaN(backendId) ? (
+          <div className="flex flex-1 items-center justify-center p-4">
+            <Card className="w-full max-w-md text-center shadow-sm">
+              <CardHeader>
+                <CardTitle>Select a backend</CardTitle>
+                <CardDescription>
+                  Choose a configured storage backend to browse the SQLite
+                  index.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild>
+                  <Link href="/admin/backends">
+                    <HardDrive className="h-4 w-4" />
+                    Manage Backends
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          <ScrollArea className="flex-1">
+            <div className="p-4">
+              <Card className="shadow-sm">
+                <CardContent className="p-0">
+                  {loadingEntries ? (
+                    <div className="space-y-3 p-4">
+                      <Skeleton className="h-10" />
+                      <Skeleton className="h-10" />
+                      <Skeleton className="h-10" />
+                      <Skeleton className="h-10" />
+                    </div>
+                  ) : entries.length === 0 && pathParam === '/' ? (
+                    <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-6 text-center">
+                      <Folder className="h-10 w-10 text-muted-foreground" />
+                      <div>
+                        <p className="font-medium">No indexed entries</p>
+                        <p className="text-sm text-muted-foreground">
+                          Run a backend scan from admin to populate this view.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead className="hidden md:table-cell">
+                            Type
+                          </TableHead>
+                          <TableHead className="hidden md:table-cell">
+                            Size
+                          </TableHead>
+                          <TableHead className="hidden lg:table-cell">
+                            Modified
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pathParam !== '/' && (
+                          <TableRow
+                            className="cursor-pointer"
+                            onClick={openParent}
+                          >
+                            <TableCell colSpan={4}>
+                              <div className="flex items-center gap-3">
+                                <span className="flex h-9 w-9 items-center justify-center rounded-md border bg-muted">
+                                  <ArrowLeft className="h-4 w-4" />
+                                </span>
+                                <span className="font-medium">Parent folder</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {entries.map((entry) => {
+                          const Icon = fileIcon(entry);
+                          const ext = entry.isDirectory
+                            ? 'Folder'
+                            : entry.name.split('.').pop()?.toUpperCase() || 'File';
+
+                          return (
+                            <TableRow
+                              key={entry.id}
+                              className="cursor-pointer"
+                              onClick={() => openEntry(entry)}
+                            >
+                              <TableCell>
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <span
+                                    className={cn(
+                                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border',
+                                      entry.isDirectory
+                                        ? 'bg-primary/10 text-primary'
+                                        : 'bg-muted text-muted-foreground'
+                                    )}
+                                  >
+                                    <Icon className="h-4 w-4" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium">
+                                      {safeDecode(entry.name)}
+                                    </div>
+                                    <div className="truncate text-xs text-muted-foreground md:hidden">
+                                      {ext}
+                                      <span className="px-1">/</span>
+                                      {entry.isDirectory ? 'Browse' : formatBytes(entry.size)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                <Badge variant="outline">{ext}</Badge>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                {entry.isDirectory ? '-' : formatBytes(entry.size)}
+                              </TableCell>
+                              <TableCell className="hidden lg:table-cell">
+                                {entry.modifiedAt
+                                  ? formatDate(entry.modifiedAt)
+                                  : '-'}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </ScrollArea>
+        )}
+
+        <Separator />
+      </section>
     </div>
   );
 }

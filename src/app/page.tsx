@@ -1,104 +1,260 @@
 import Link from 'next/link';
-import { Search, Folder, Library, ArrowRight } from 'lucide-react';
+import {
+  Database,
+  FileSearch,
+  FolderOpen,
+  HardDrive,
+  Library,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import db from '@/utils/db';
+
+export const dynamic = 'force-dynamic';
+
+type BackendSummary = {
+  id: number;
+  name: string;
+  scannedAt: string | null;
+  fileCount: number;
+};
+
+type Stats = {
+  backendCount: number;
+  fileCount: number;
+  folderCount: number;
+  lastScannedAt: string | null;
+};
+
+function formatDate(value: string | null) {
+  if (!value) return 'Not scanned';
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+function getStats() {
+  const stats = db
+    .prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM backends) AS backendCount,
+        (SELECT COUNT(*) FROM files WHERE isDirectory = 0) AS fileCount,
+        (SELECT COUNT(*) FROM files WHERE isDirectory = 1) AS folderCount,
+        (SELECT MAX(scannedAt) FROM backends) AS lastScannedAt
+    `)
+    .get() as Stats;
+
+  const backends = db
+    .prepare(`
+      SELECT
+        b.id,
+        b.name,
+        b.scannedAt,
+        COUNT(f.id) AS fileCount
+      FROM backends b
+      LEFT JOIN files f ON f.backendId = b.id
+      GROUP BY b.id
+      ORDER BY b.id
+      LIMIT 8
+    `)
+    .all() as BackendSummary[];
+
+  return { stats, backends };
+}
 
 export default function HomePage() {
+  const { stats, backends } = getStats();
+
   return (
-    <div className="container mx-auto px-4 py-16 max-w-5xl">
-      <div className="flex flex-col items-center text-center mb-16 space-y-4">
-        <div className="p-4 bg-primary/10 rounded-full mb-4">
-          <Library className="w-16 h-16 text-primary" />
-        </div>
-        <h1 className="text-4xl font-bold tracking-tight lg:text-5xl">
-          Welcome to File Library
-        </h1>
-        <p className="text-xl text-muted-foreground max-w-[600px]">
-          Your personal library for organizing, browsing, and enjoying your media collection across all your devices.
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6">
+      <section className="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
+        <Card className="shadow-sm">
+          <CardHeader className="space-y-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-2">
+                <Badge variant="secondary" className="w-fit gap-1.5">
+                  <Library className="h-3.5 w-3.5" />
+                  File Node
+                </Badge>
+                <CardTitle className="text-2xl md:text-3xl">
+                  Self-hosted file index
+                </CardTitle>
+                <CardDescription className="max-w-2xl">
+                  Connect HTTP directory backends, index their files into SQLite,
+                  and browse or search from one interface.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild>
+                  <Link href="/files/browse">
+                    <FolderOpen className="h-4 w-4" />
+                    Browse
+                  </Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/files/search">
+                    <FileSearch className="h-4 w-4" />
+                    Search
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <HardDrive className="h-4 w-4" />
+                  Backends
+                </div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {stats.backendCount}
+                </div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Database className="h-4 w-4" />
+                  Indexed Files
+                </div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {stats.fileCount.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <FolderOpen className="h-4 w-4" />
+                  Folders
+                </div>
+                <div className="mt-2 text-2xl font-semibold">
+                  {stats.folderCount.toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <RefreshCw className="h-4 w-4" />
+                  Last Scan
+                </div>
+                <div className="mt-2 text-sm font-medium">
+                  {formatDate(stats.lastScannedAt)}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-        <Link href="/files/search" className="block group">
-          <Card className="flex flex-col h-full transition-all duration-300 hover:scale-105 hover:shadow-lg border-2 hover:border-primary/50 cursor-pointer">
-            <CardHeader>
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50 transition-colors">
-                <Search className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="h-4 w-4" />
+              Self-hosting Controls
+            </CardTitle>
+            <CardDescription>
+              Admin-only controls manage backend credentials and indexing.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">SQLite index</span>
+                <Badge variant="outline">Enabled</Badge>
               </div>
-              <CardTitle className="group-hover:text-primary transition-colors">Search</CardTitle>
-              <CardDescription>
-                Find specific files instantly with powerful search capabilities.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1">
-              <p className="text-sm text-muted-foreground">
-                Search by filename, type, date, or content to locate exactly what you need in seconds.
-              </p>
-            </CardContent>
-            <CardFooter>
-              <div className="flex items-center text-sm font-medium text-primary">
-                Go to Search <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <Separator />
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Backend secrets</span>
+                <Badge variant="outline">Server-side</Badge>
               </div>
-            </CardFooter>
-          </Card>
-        </Link>
+              <Separator />
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">Manual scans</span>
+                <Badge variant="outline">Admin</Badge>
+              </div>
+            </div>
+            <Button asChild variant="secondary" className="w-full">
+              <Link href="/admin/backends">
+                <HardDrive className="h-4 w-4" />
+                Manage Backends
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
 
-        <Link href="/files/browse" className="block group">
-          <Card className="flex flex-col h-full transition-all duration-300 hover:scale-105 hover:shadow-lg border-2 hover:border-primary/50 cursor-pointer">
-            <CardHeader>
-              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center mb-4 group-hover:bg-green-200 dark:group-hover:bg-green-900/50 transition-colors">
-                <Folder className="w-6 h-6 text-green-600 dark:text-green-400" />
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle>Connected Backends</CardTitle>
+            <CardDescription>
+              Indexed sources available to the browser and search views.
+            </CardDescription>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin/backends">
+              <HardDrive className="h-4 w-4" />
+              Configure
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {backends.length === 0 ? (
+            <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-dashed text-center">
+              <HardDrive className="h-8 w-8 text-muted-foreground" />
+              <div>
+                <p className="font-medium">No backends configured</p>
+                <p className="text-sm text-muted-foreground">
+                  Add a backend in admin to start indexing files.
+                </p>
               </div>
-              <CardTitle className="group-hover:text-primary transition-colors">Browse</CardTitle>
-              <CardDescription>
-                Explore your collection through a familiar folder structure.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1">
-              <p className="text-sm text-muted-foreground">
-                Navigate through directories and view your files organized exactly how you stored them.
-              </p>
-            </CardContent>
-            <CardFooter>
-              <div className="flex items-center text-sm font-medium text-primary">
-                Start Browsing <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </CardFooter>
-          </Card>
-        </Link>
-      </div>
-
-      <div className="mt-24 text-center text-sm text-muted-foreground space-y-2">
-        <p>
-          Project GitHub:{' '}
-          <a
-            href="https://github.com/tonyliuzj/librix"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-primary transition-colors underline underline-offset-4"
-          >
-            tonyliuzj/librix
-          </a>
-        </p>
-        <p>
-          Developed by{' '}
-          <a
-            href="https://tony-liu.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-primary transition-colors underline underline-offset-4"
-          >
-            tony-liu.com
-          </a>
-        </p>
-      </div>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Indexed Entries</TableHead>
+                  <TableHead>Last Scan</TableHead>
+                  <TableHead className="text-right">Open</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {backends.map((backend) => (
+                  <TableRow key={backend.id}>
+                    <TableCell className="font-medium">{backend.name}</TableCell>
+                    <TableCell>{backend.fileCount.toLocaleString()}</TableCell>
+                    <TableCell>{formatDate(backend.scannedAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/files/browse?backendId=${backend.id}&path=%2F`}>
+                          Browse
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

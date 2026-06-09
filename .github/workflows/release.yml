@@ -1,80 +1,81 @@
-name: Upload librix.sh to Release
+name: Upload file-node.sh to Release
 
 on:
   push:
     branches:
       - main
+    paths:
+      - file-node.sh
+      - .github/workflows/release.yml
 
 jobs:
   upload-release-asset:
-    name: Upload librix.sh to Release
+    name: Upload file-node.sh to Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Get latest release
-        id: get_release
-        uses: actions/github-script@v6
+      - name: Ensure latest release exists
+        id: latest_release
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { data: releases } = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo
-            });
-            if (releases.length === 0) {
-              console.log("No releases found. Creating a new release...");
+            const { owner, repo } = context.repo;
+
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: 'latest',
+              });
+              core.setOutput('release_id', String(release.id));
               return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
             }
-            core.setOutput("release_id", releases[0].id);
 
-      - name: Create a new release if none exists
-        id: create_release
-        if: steps.get_release.outputs.release_id == ''
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
             const { data: release } = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               tag_name: 'latest',
               name: 'Latest Release',
-              body: 'This is the latest release.',
+              body: 'Latest File Node install script.',
               draft: false,
-              prerelease: false
+              prerelease: false,
             });
-            core.setOutput("release_id", release.id);
+            core.setOutput('release_id', String(release.id));
 
-      - name: Delete existing librix.sh asset (if exists)
-        continue-on-error: true
-        uses: actions/github-script@v6
+      - name: Delete existing file-node.sh asset
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const release_id = '${{ steps.get_release.outputs.release_id || steps.create_release.outputs.release_id }}';
+            const { owner, repo } = context.repo;
+            const release_id = Number('${{ steps.latest_release.outputs.release_id }}');
             const { data: assets } = await github.rest.repos.listReleaseAssets({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release_id
+              owner,
+              repo,
+              release_id,
             });
+
             for (const asset of assets) {
-              if (asset.name === 'librix.sh') {
+              if (asset.name === 'file-node.sh') {
                 await github.rest.repos.deleteReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  asset_id: asset.id
+                  owner,
+                  repo,
+                  asset_id: asset.id,
                 });
               }
             }
 
-      - name: Upload librix.sh to Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload file-node.sh to Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: librix.sh
+          files: file-node.sh
           tag_name: latest
           token: ${{ secrets.GITHUB_TOKEN }}

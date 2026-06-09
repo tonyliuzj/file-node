@@ -5,6 +5,7 @@ import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { Loader2, Download, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 
 interface TextViewerProps {
   fileUrl: string;
@@ -65,17 +66,19 @@ export default function TextViewerClient({ fileUrl, fileName }: TextViewerProps)
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-background space-y-4">
-        <div className="flex items-center text-destructive">
-             <AlertCircle className="h-6 w-6 mr-2" />
-             <p className="font-medium">{error}</p>
-        </div>
-        <Button asChild>
+      <div className="flex h-full items-center justify-center bg-muted/40 p-4">
+        <Card className="w-full max-w-md shadow-sm">
+          <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="font-medium">{error}</p>
+            <Button asChild>
             <a href={fileUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />
-                Download {fileName}
+                Download
             </a>
-        </Button>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

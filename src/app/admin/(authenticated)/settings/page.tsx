@@ -3,6 +3,21 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
+import { AlertCircle, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -14,8 +29,8 @@ export default function SettingsPage() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setSuccess('');
 
@@ -23,19 +38,16 @@ export default function SettingsPage() {
       setError('Current password is required');
       return;
     }
-
-    if (!newUsername && !newPassword) {
-      setError('Please provide a new username or password');
+    if (!newUsername.trim() && !newPassword) {
+      setError('Provide a new username or password');
       return;
     }
-
     if (newPassword && newPassword !== confirmPassword) {
       setError('New passwords do not match');
       return;
     }
-
-    if (newPassword && newPassword.length < 6) {
-      setError('New password must be at least 6 characters');
+    if (newPassword && newPassword.length < 10) {
+      setError('New password must be at least 10 characters');
       return;
     }
 
@@ -47,128 +59,143 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           currentPassword,
-          newUsername: newUsername || undefined,
+          newUsername: newUsername.trim() || undefined,
           newPassword: newPassword || undefined,
         }),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
-        setError(data.error || 'Failed to update credentials');
-        setLoading(false);
-        return;
+        throw new Error(data.error || 'Failed to update credentials');
       }
 
-      setSuccess('Credentials updated successfully! Redirecting to sign in...');
+      setSuccess('Credentials updated. Redirecting to sign in...');
       setCurrentPassword('');
       setNewUsername('');
       setNewPassword('');
       setConfirmPassword('');
 
-      // Sign out and redirect to sign in page
       setTimeout(async () => {
         await signOut({ redirect: false });
         router.push('/admin/signin');
-      }, 2000);
-    } catch {
-      setError('An error occurred while updating credentials');
+      }, 1200);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update credentials');
       setLoading(false);
     }
   };
 
   return (
-    <div className="container max-w-2xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Admin Settings</h1>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-6">
+      <Card className="shadow-sm">
+        <CardHeader>
+          <Badge variant="secondary" className="mb-2 w-fit gap-1.5">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Account
+          </Badge>
+          <CardTitle className="text-2xl">Admin settings</CardTitle>
+          <CardDescription>
+            Change the local admin username or password used for backend
+            management.
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
-      <div className="bg-card rounded-lg border p-6">
-        <h2 className="text-xl font-semibold mb-4">Change Credentials</h2>
+      {(error || success) && (
+        <Card
+          className={
+            error
+              ? 'border-destructive/40 bg-destructive/10 shadow-sm'
+              : 'border-primary/30 bg-primary/10 shadow-sm'
+          }
+        >
+          <CardContent
+            className={
+              error
+                ? 'flex items-center gap-2 p-4 text-sm text-destructive'
+                : 'flex items-center gap-2 p-4 text-sm text-primary'
+            }
+          >
+            {error ? (
+              <AlertCircle className="h-4 w-4" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            {error || success}
+          </CardContent>
+        </Card>
+      )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="currentPassword" className="block text-sm font-medium mb-2">
-              Current Password *
-            </label>
-            <input
-              id="currentPassword"
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full px-3 py-2 border rounded-md bg-background"
-              required
-              disabled={loading}
-            />
-          </div>
+      <Card className="shadow-sm">
+        <form onSubmit={handleSubmit}>
+          <CardHeader>
+            <CardTitle>Credentials</CardTitle>
+            <CardDescription>
+              Current password verification is required before applying changes.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="currentPassword">Current password</Label>
+              <Input
+                id="currentPassword"
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                required
+                disabled={loading}
+              />
+            </div>
 
-          <div className="border-t pt-4 mt-4">
-            <p className="text-sm text-muted-foreground mb-4">
-              Leave fields blank if you don&apos;t want to change them
-            </p>
+            <Separator />
 
-            <div>
-              <label htmlFor="newUsername" className="block text-sm font-medium mb-2">
-                New Username
-              </label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="newUsername">New username</Label>
+              <Input
                 id="newUsername"
                 type="text"
                 value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value)}
-                className="w-full px-3 py-2 border rounded-md bg-background"
+                onChange={(event) => setNewUsername(event.target.value)}
+                placeholder="Leave blank to keep current username"
                 disabled={loading}
               />
+              <p className="text-xs text-muted-foreground">
+                Use 3-64 letters, numbers, dots, dashes, or underscores.
+              </p>
             </div>
 
-            <div className="mt-4">
-              <label htmlFor="newPassword" className="block text-sm font-medium mb-2">
-                New Password
-              </label>
-              <input
-                id="newPassword"
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full px-3 py-2 border rounded-md bg-background"
-                disabled={loading}
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">New password</Label>
+                <Input
+                  id="newPassword"
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="Leave blank to keep current password"
+                  disabled={loading}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm password</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  disabled={loading}
+                />
+              </div>
             </div>
-
-            <div className="mt-4">
-              <label htmlFor="confirmPassword" className="block text-sm font-medium mb-2">
-                Confirm New Password
-              </label>
-              <input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3 py-2 border rounded-md bg-background"
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-md text-sm">
-              {error}
-            </div>
-          )}
-
-          {success && (
-            <div className="bg-green-500/10 text-green-600 dark:text-green-400 px-4 py-3 rounded-md text-sm">
-              {success}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Updating...' : 'Update Credentials'}
-          </button>
+          </CardContent>
+          <CardFooter>
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Update Credentials
+            </Button>
+          </CardFooter>
         </form>
-      </div>
+      </Card>
     </div>
   );
 }

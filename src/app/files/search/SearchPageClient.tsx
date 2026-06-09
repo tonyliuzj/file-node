@@ -1,162 +1,343 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Search, File, Folder, Film, Image as ImageIcon, Loader2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Database,
+  File,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileSearch,
+  FileText,
+  FileVideo,
+  Folder,
+  Loader2,
+  Search,
+} from 'lucide-react';
 
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 type SearchResult = {
   id: number;
   backendId: number;
   path: string;
-  isDirectory: boolean;
+  name: string;
+  isDirectory: number | boolean;
+  size: number | null;
+  modifiedAt: string | null;
+  scannedAt: string | null;
 };
 
 type Backend = {
   id: number;
   name: string;
+  fileCount?: number;
 };
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function formatBytes(value: number | null) {
+  if (!value) return 'Unknown';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function fileIcon(result: SearchResult) {
+  if (Boolean(result.isDirectory)) return Folder;
+  const ext = result.name.split('.').pop()?.toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext || '')) {
+    return FileImage;
+  }
+  if (['mp4', 'webm', 'mov', 'mkv', 'ogg'].includes(ext || '')) {
+    return FileVideo;
+  }
+  if (['mp3', 'wav', 'flac', 'aac'].includes(ext || '')) {
+    return FileAudio;
+  }
+  if (['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'xml', 'yaml'].includes(ext || '')) {
+    return FileCode;
+  }
+  if (['md', 'markdown', 'txt', 'csv', 'pdf'].includes(ext || '')) {
+    return FileText;
+  }
+  return File;
+}
 
 export default function SearchPageClient() {
   const searchParams = useSearchParams();
   const q = searchParams.get('q') || '';
   const [backends, setBackends] = useState<Backend[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    async function fetchData() {
+    let mounted = true;
+
+    async function fetchBackends() {
       try {
         const backendsRes = await fetch('/api/backends', { cache: 'no-store' });
-        if (backendsRes.ok) {
-          setBackends(await backendsRes.json());
-        }
-        
-        if (q) {
-          setLoading(true);
-          const resultsRes = await fetch(`/api/files/search?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
-          if (resultsRes.ok) {
-            setResults(await resultsRes.json());
-          } else {
-            setResults([]);
-          }
-        } else {
-          setResults([]);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
+        if (!backendsRes.ok) throw new Error('Failed to load backends');
+        const data = (await backendsRes.json()) as Backend[];
+        if (mounted) setBackends(data);
+      } catch {
+        if (mounted) setError('Unable to load backend metadata');
       }
     }
-    fetchData();
+
+    fetchBackends();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function searchFiles() {
+      setError('');
+      if (!q.trim()) {
+        setResults([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const resultsRes = await fetch(
+          `/api/files/search?q=${encodeURIComponent(q)}`,
+          { cache: 'no-store' }
+        );
+        if (!resultsRes.ok) throw new Error('Search failed');
+        const data = (await resultsRes.json()) as SearchResult[];
+        if (mounted) setResults(data);
+      } catch {
+        if (mounted) {
+          setResults([]);
+          setError('Search failed against the file index');
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    searchFiles();
+    return () => {
+      mounted = false;
+    };
   }, [q]);
 
-  const getFileIcon = (path: string, isDirectory: boolean) => {
-    if (isDirectory) {
-      return <Folder className="h-6 w-6 text-yellow-500" />;
-    }
-    const ext = path.split('.').pop()?.toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
-      return <ImageIcon className="h-6 w-6 text-purple-500" />;
-    }
-    if (['mp4', 'webm', 'mov'].includes(ext || '')) {
-      return <Film className="h-6 w-6 text-red-500" />;
-    }
-    return <File className="h-6 w-6 text-muted-foreground" />;
-  };
+  const backendMap = useMemo(() => {
+    return new Map(backends.map((backend) => [backend.id, backend]));
+  }, [backends]);
+
+  const indexedCount = backends.reduce(
+    (total, backend) => total + (backend.fileCount ?? 0),
+    0
+  );
 
   return (
-    <div className="container mx-auto max-w-3xl py-12">
-      <div className="text-center mb-12 space-y-4">
-        <h1 className="text-4xl font-extrabold tracking-tight lg:text-5xl">
-          Search Files
-        </h1>
-        <p className="text-lg text-muted-foreground">
-          Find documents, images, and media across all your backends.
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6">
+      <Card className="shadow-sm">
+        <CardHeader className="gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            <Badge variant="secondary" className="w-fit gap-1.5">
+              <FileSearch className="h-3.5 w-3.5" />
+              Search
+            </Badge>
+            <div>
+              <CardTitle className="text-2xl">Find indexed files</CardTitle>
+              <CardDescription>
+                Search names across all configured backends.
+              </CardDescription>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="rounded-lg border px-3 py-2">
+              <div className="text-muted-foreground">Backends</div>
+              <div className="text-lg font-semibold">{backends.length}</div>
+            </div>
+            <div className="rounded-lg border px-3 py-2">
+              <div className="text-muted-foreground">Indexed</div>
+              <div className="text-lg font-semibold">
+                {indexedCount.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <form method="get" className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                name="q"
+                defaultValue={q}
+                placeholder="Search by name"
+                className="pl-9"
+                autoComplete="off"
+              />
+            </div>
+            <Button type="submit">
+              <Search className="h-4 w-4" />
+              Search
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
-      <form method="get" className="mb-12 relative flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            name="q"
-            defaultValue={q}
-            placeholder="Search for files..."
-            className="pl-9 h-10"
-          />
-        </div>
-        <Button type="submit" size="default">
-          Search
-        </Button>
-      </form>
-
-      {loading && (
-        <div className="flex justify-center my-12">
-          <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        </div>
-      )}
-
-      {!loading && q && results.length === 0 && (
-        <Card className="text-center py-12">
-          <CardContent>
-            <Search className="h-12 w-12 mx-auto text-muted-foreground mb-4 opacity-20" />
-            <p className="text-lg text-muted-foreground">
-              No files found for {`"${q}"`}.
-            </p>
+      {error && (
+        <Card className="border-destructive/40 bg-destructive/10 shadow-sm">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" />
+            {error}
           </CardContent>
         </Card>
       )}
 
-      {results.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight pl-1">
-            {results.length} result{results.length === 1 ? '' : 's'} found
-          </h2>
-          <div className="grid gap-4">
-            {results.map((r) => {
-              const be = backends.find((b) => b.id === r.backendId);
-              const backendName = be ? be.name : `Backend #${r.backendId}`;
-              const fileName = r.path.split('/').pop();
-              const dirPath = r.path.substring(0, r.path.lastIndexOf('/'));
-              
-              return (
-                <Link
-                  key={r.id}
-                  href={r.isDirectory ? `/files/browse?backendId=${r.backendId}&path=${encodeURIComponent(r.path)}` : `/files/${r.id}?backendId=${r.backendId}&path=${encodeURIComponent(r.path)}`}
-                >
-                  <Card className="hover:bg-accent/50 transition-colors">
-                    <CardContent className="p-4 flex items-start space-x-4">
-                      <div className="flex-shrink-0 mt-1">
-                        {getFileIcon(r.path, r.isDirectory)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-base font-semibold truncate">
-                          {decodeURIComponent(fileName || r.path)}
-                        </p>
-                        <p className="text-sm text-muted-foreground truncate mt-0.5">
-                          {decodeURIComponent(dirPath) || '/'}
-                        </p>
-                        <div className="mt-2">
-                          <Badge variant="secondary" className="text-xs">
-                            {backendName}
-                          </Badge>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              );
-            })}
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle>Results</CardTitle>
+            <CardDescription>
+              {q ? `${results.length} match${results.length === 1 ? '' : 'es'} for "${q}"` : 'Enter a query to search the index.'}
+            </CardDescription>
           </div>
-        </div>
-      )}
+          {loading && (
+            <Badge variant="outline" className="w-fit gap-1.5">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Searching
+            </Badge>
+          )}
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="space-y-3 p-6">
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+              <Skeleton className="h-10" />
+            </div>
+          ) : q && results.length === 0 ? (
+            <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-6 text-center">
+              <Search className="h-10 w-10 text-muted-foreground" />
+              <div>
+                <p className="font-medium">No matches</p>
+                <p className="text-sm text-muted-foreground">
+                  Try a shorter term or rescan your backends.
+                </p>
+              </div>
+            </div>
+          ) : !q ? (
+            <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-6 text-center">
+              <Database className="h-10 w-10 text-muted-foreground" />
+              <div>
+                <p className="font-medium">Search the SQLite index</p>
+                <p className="text-sm text-muted-foreground">
+                  Results appear here without crawling backends live.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="hidden md:table-cell">Backend</TableHead>
+                  <TableHead className="hidden md:table-cell">Size</TableHead>
+                  <TableHead className="text-right">Open</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {results.map((result) => {
+                  const backend = backendMap.get(result.backendId);
+                  const isDirectory = Boolean(result.isDirectory);
+                  const Icon = fileIcon(result);
+                  const href = isDirectory
+                    ? `/files/browse?backendId=${result.backendId}&path=${encodeURIComponent(result.path)}`
+                    : `/files/${result.id}?backendId=${result.backendId}&path=${encodeURIComponent(result.path)}`;
+                  const parentPath =
+                    result.path.substring(0, result.path.lastIndexOf('/')) || '/';
+
+                  return (
+                    <TableRow key={result.id}>
+                      <TableCell>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span
+                            className={cn(
+                              'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border',
+                              isDirectory
+                                ? 'bg-primary/10 text-primary'
+                                : 'bg-muted text-muted-foreground'
+                            )}
+                          >
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {safeDecode(result.name || result.path.split('/').pop() || result.path)}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {safeDecode(parentPath)}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <Badge variant="outline">
+                          {backend?.name || `Backend #${result.backendId}`}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {isDirectory ? '-' : formatBytes(result.size)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button asChild variant="ghost" size="sm">
+                          <Link href={href}>
+                            {isDirectory ? 'Browse' : 'Preview'}
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

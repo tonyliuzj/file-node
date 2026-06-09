@@ -4,15 +4,7 @@ import { getServerSession } from 'next-auth/next';
 import db from '@/utils/db';
 import { authOptions } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
-
-async function requireAdmin() {
-  const session = await getServerSession(authOptions);
-  const user = session?.user as { role?: string };
-  if (!session || user.role !== 'admin') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  return null;
-}
+import { requireAdmin } from '@/lib/admin';
 
 export async function PUT(req: NextRequest) {
   try {
@@ -20,6 +12,10 @@ export async function PUT(req: NextRequest) {
     if (authErr) return authErr;
 
     const { currentPassword, newUsername, newPassword } = await req.json();
+    const nextUsername =
+      typeof newUsername === 'string' ? newUsername.trim() : '';
+    const nextPassword =
+      typeof newPassword === 'string' ? newPassword : '';
 
     if (!currentPassword) {
       return NextResponse.json(
@@ -28,9 +24,21 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    if (!newUsername && !newPassword) {
+    if (!nextUsername && !nextPassword) {
       return NextResponse.json(
         { error: 'New username or password is required' },
+        { status: 400 }
+      );
+    }
+    if (nextUsername && !/^[a-zA-Z0-9._-]{3,64}$/.test(nextUsername)) {
+      return NextResponse.json(
+        { error: 'Username must be 3-64 characters using letters, numbers, dots, dashes, or underscores' },
+        { status: 400 }
+      );
+    }
+    if (nextPassword && nextPassword.length < 10) {
+      return NextResponse.json(
+        { error: 'New password must be at least 10 characters' },
         { status: 400 }
       );
     }
@@ -38,9 +46,8 @@ export async function PUT(req: NextRequest) {
     const session = await getServerSession(authOptions);
     const currentUser = session?.user?.name;
 
-    // Get current user from database
     const user = db
-      .prepare('SELECT * FROM users WHERE username = ?')
+      .prepare('SELECT id, username, password FROM users WHERE username = ?')
       .get(currentUser) as { id: number; username: string; password: string } | undefined;
 
     if (!user) {
@@ -50,18 +57,14 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    // Verify current password
-    // Check if password is hashed (bcrypt hashes start with $2a$, $2b$, or $2y$)
-    const isHashed = user.password.startsWith('$2');
-
-    let isPasswordValid = false;
-    if (isHashed) {
-      // Compare with bcrypt
-      isPasswordValid = await bcrypt.compare(currentPassword, user.password);
-    } else {
-      // Plain text comparison (for backwards compatibility)
-      isPasswordValid = currentPassword === user.password;
+    if (!user.password.startsWith('$2')) {
+      return NextResponse.json(
+        { error: 'Stored password requires migration before it can be used' },
+        { status: 401 }
+      );
     }
+
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
 
     if (!isPasswordValid) {
       return NextResponse.json(
@@ -70,16 +73,27 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    // Update username and/or password
-    if (newUsername && newPassword) {
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
+    if (nextUsername) {
+      const duplicate = db
+        .prepare('SELECT id FROM users WHERE username = ? AND id != ?')
+        .get(nextUsername, user.id) as { id: number } | undefined;
+      if (duplicate) {
+        return NextResponse.json(
+          { error: 'Username is already in use' },
+          { status: 409 }
+        );
+      }
+    }
+
+    if (nextUsername && nextPassword) {
+      const hashedPassword = await bcrypt.hash(nextPassword, 12);
       db.prepare('UPDATE users SET username = ?, password = ? WHERE id = ?')
-        .run(newUsername, hashedPassword, user.id);
-    } else if (newUsername) {
+        .run(nextUsername, hashedPassword, user.id);
+    } else if (nextUsername) {
       db.prepare('UPDATE users SET username = ? WHERE id = ?')
-        .run(newUsername, user.id);
-    } else if (newPassword) {
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
+        .run(nextUsername, user.id);
+    } else if (nextPassword) {
+      const hashedPassword = await bcrypt.hash(nextPassword, 12);
       db.prepare('UPDATE users SET password = ? WHERE id = ?')
         .run(hashedPassword, user.id);
     }

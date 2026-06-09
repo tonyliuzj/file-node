@@ -1,17 +1,18 @@
-# Librix
+# File Node
 
-Librix is a Next.js–powered media explorer web application that lets you index and browse files (PDF, MP4, images, audio, markdown, text, etc.) stored on one or more remote HTTP/WebDAV–style servers. You run a small VPS frontend that proxies and catalogs content in SQLite, while storage back-ends live on low-cost shared hosting or any HTTP server.
+File Node is a Next.js-powered self-hosted file explorer that indexes and browses files (PDF, MP4, images, audio, markdown, text, etc.) stored on one or more remote HTTP directory-listing backends. You run a small frontend that proxies and catalogs content in SQLite, while storage backends live on shared hosting, a local file server, or any HTTP server with directory listing enabled.
 
 ## Features
 
-- **Full-text search** by filename across all backends
+- **Fast search** by filename across the local SQLite index
 - **Explorer UI**: navigate folder hierarchies with breadcrumb navigation
 - **Inline viewer** for PDFs, images, video, audio, markdown, and text files (uses HTTP Range requests)
 - **Auto-rescan**: background cron job scans backends at configured intervals
-- **Admin panel**: add/edit/delete backends, name them, configure auth & intervals
+- **Admin panel**: add/edit/delete backends, name them, configure auth and scan intervals
 - **NextAuth** credentials provider: only admins can manage backends
+- Backend Basic auth passwords are encrypted at rest and never returned in JSON
 - Guests can browse & view files without seeing backend URLs
-- **Modern UI**: Built with shadcn/ui components and Tailwind CSS
+- **Modern app UI** built with shadcn/ui components and Tailwind CSS
 
 ## Prerequisites
 
@@ -25,7 +26,7 @@ Librix is a Next.js–powered media explorer web application that lets you index
 ### Run by script (One Click Install)
 
 ```bash
-curl -sSL https://github.com/tonyliuzj/librix/releases/latest/download/librix.sh -o librix.sh && chmod +x librix.sh && bash librix.sh
+curl -sSL https://github.com/tonyliuzj/file-node/releases/latest/download/file-node.sh -o file-node.sh && chmod +x file-node.sh && bash file-node.sh
 ```
 
 ### Manual Installation
@@ -33,8 +34,8 @@ curl -sSL https://github.com/tonyliuzj/librix/releases/latest/download/librix.sh
 1. **Clone the repo**
 
    ```bash
-   git clone https://github.com/tonyliuzj/librix.git
-   cd librix
+   git clone https://github.com/tonyliuzj/file-node.git
+   cd file-node
    ```
 
 2. **Install dependencies**
@@ -45,15 +46,12 @@ curl -sSL https://github.com/tonyliuzj/librix/releases/latest/download/librix.sh
 
 3. **Environment variables**
 
-   Copy `example.env.local` to `.env.local` and fill in:
+   Copy `example.env.local` to `.env.local` if you want to override the port
+   or pin a credential-encryption secret:
 
    ```
-   NEXTAUTH_SECRET=your-secret-key-here-generate-with-openssl-rand-base64-32
-   ```
-
-   Generate a secure secret:
-   ```bash
-   openssl rand -base64 32
+   FILE_NODE_SECRET_KEY=optional-separate-secret-for-backend-credential-encryption
+   PORT=3000
    ```
 
 4. **Run in development**
@@ -73,9 +71,9 @@ curl -sSL https://github.com/tonyliuzj/librix/releases/latest/download/librix.sh
 ## Project Structure
 
 ```
-librix/
+file-node/
 ├── .env.local               # your secrets
-├── data.db                  # SQLite database (auto-created)
+├── data/                    # SQLite database and generated local secret
 ├── next.config.js
 ├── package.json
 ├── src/
@@ -127,17 +125,20 @@ librix/
 
 | Variable          | Description                             |
 | ----------------- | --------------------------------------- |
-| `NEXTAUTH_SECRET` | Random secret for NextAuth JWT/session (min 32 characters) |
+| `FILE_NODE_SECRET_KEY` | Optional persistent server secret for backend credential encryption |
+| `PORT` | Optional port for local/PM2 startup |
 
 ### Initial Setup
 
-On first run, you'll need to create an admin user in the SQLite database. The application uses credentials-based authentication stored in the `users` table.
+On first run, or whenever the database has no users, open `/setup` to create
+the first local admin account. The setup API is disabled automatically after the
+first user exists. Passwords are stored with bcrypt.
 
 ## Usage
 
 * **Guest users**
 
-  * Home: `/` - Landing page with navigation
+  * Home: `/` - Dashboard with index and backend status
   * Search: `/files/search?q=filename` - Search for files across all backends
   * Browse: `/files/browse?backendId=<ID>&path=/<folder>/` - Navigate folder hierarchies
   * View: `/files/<fileId>` - View individual files (PDF, images, video, audio, markdown, text)
@@ -151,7 +152,7 @@ On first run, you'll need to create an admin user in the SQLite database. The ap
 ## API Endpoints
 
 * **`GET /api/backends`**
-  Returns `[{ id, name, rescanInterval }]` to everyone.
+  Public requests receive safe backend metadata. Admin sessions also receive URLs, scan settings, scan timestamps, and index counts. Passwords are never returned.
 * **`POST/PUT/DELETE /api/backends`**
   Admin-only: create, update, delete backends.
 * **`POST /api/backends/scan`**
@@ -165,8 +166,9 @@ On first run, you'll need to create an admin user in the SQLite database. The ap
 
 ## Security
 
-* Backend URLs are never exposed in client bundle or JSON.
-* Guests cannot access admin APIs or see raw URLs.
-* Admin panel & mutating routes require NextAuth credentials.
+* Backend passwords are encrypted at rest with `FILE_NODE_SECRET_KEY` or a generated persistent secret in `data/secret.key`. Existing `LIBRIX_SECRET_KEY` and `NEXTAUTH_SECRET` deployments remain supported as fallbacks.
+* Guests cannot access admin APIs or backend credentials.
+* Admin panel and mutating routes require NextAuth credentials.
+* File proxy requests are checked against the indexed backend root and return `X-Content-Type-Options: nosniff`.
 
 ---

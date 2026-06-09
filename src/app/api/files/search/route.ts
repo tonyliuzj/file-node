@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
+import { escapeLike } from '@/lib/security';
 
 export function GET(req: NextRequest) {
   try {
-    const q = req.nextUrl.searchParams.get('q') || '';
+    const q = (req.nextUrl.searchParams.get('q') || '').trim().slice(0, 200);
+    if (!q) {
+      return NextResponse.json([]);
+    }
+
     const rows = db
       .prepare(
-        `SELECT id, backendId, path, name, size, modifiedAt, scannedAt
+        `SELECT id, backendId, path, name, isDirectory, size, modifiedAt, scannedAt
          FROM files
-         WHERE name LIKE ? AND isDirectory = 0
+         WHERE name LIKE ? ESCAPE '\\'
          ORDER BY name
          LIMIT 200`
       )
-      .all(`%${q}%`);
+      .all(`%${escapeLike(q)}%`);
     return NextResponse.json(rows);
   } catch (error) {
     console.error('Error searching files:', error);

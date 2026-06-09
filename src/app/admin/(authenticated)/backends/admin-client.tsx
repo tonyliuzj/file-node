@@ -1,15 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { signOut } from 'next-auth/react';
-import { Loader2, RefreshCw, Trash2, Edit2, LogOut, Server } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Edit2,
+  Loader2,
+  LogOut,
+  RefreshCw,
+  Server,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -18,332 +32,562 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog"
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 type Backend = {
   id: number;
   name: string;
   url: string;
-  authEnabled: boolean;
-  username?: string;
-  password?: string;
+  authEnabled: number | boolean;
+  username?: string | null;
+  hasPassword?: number | boolean;
   rescanInterval?: number | null;
+  scannedAt?: string | null;
+  fileCount?: number;
 };
+
+type BackendForm = {
+  id?: number;
+  name: string;
+  url: string;
+  authEnabled: boolean;
+  username: string;
+  password: string;
+  rescanInterval: string;
+};
+
+const emptyForm: BackendForm = {
+  name: '',
+  url: '',
+  authEnabled: false,
+  username: '',
+  password: '',
+  rescanInterval: '',
+};
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return 'Not scanned';
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
+function normalizeUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return `http://${trimmed}`;
+}
 
 export default function AdminClient() {
   const [backends, setBackends] = useState<Backend[]>([]);
-  const [form, setForm] = useState<Partial<Backend>>({
-    authEnabled: false,
-    rescanInterval: null,
-  });
-  const [urlError, setUrlError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState<BackendForm>(emptyForm);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [scanningId, setScanningId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function refreshBackends() {
+    const res = await fetch('/api/backends', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Failed to load backends');
+    setBackends((await res.json()) as Backend[]);
+  }
 
   useEffect(() => {
-    (async () => {
+    let mounted = true;
+    async function load() {
       setLoading(true);
+      setError('');
       try {
-        setBackends(await fetch('/api/backends').then((r) => r.json()));
+        const res = await fetch('/api/backends', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load backends');
+        const data = (await res.json()) as Backend[];
+        if (mounted) setBackends(data);
+      } catch {
+        if (mounted) setError('Unable to load backends');
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
-    })();
+    }
+    load();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
+  const activeBackend = useMemo(
+    () => backends.find((backend) => backend.id === form.id),
+    [backends, form.id]
+  );
+
   async function save() {
-    let url = form.url?.trim() || '';
-    if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'http://' + url;
+    setError('');
+    setMessage('');
+
+    const url = normalizeUrl(form.url);
+    if (!url) {
+      setError('Backend URL is required');
+      return;
+    }
+    if (form.authEnabled && (!form.username.trim() || (!form.password && !activeBackend?.hasPassword))) {
+      setError('Username and password are required when authentication is enabled');
+      return;
     }
 
-    const method = form.id ? 'PUT' : 'POST';
-    const res = await fetch('/api/backends', {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, url }),
-    });
-    const saved: Backend = await res.json();
+    const interval = form.rescanInterval.trim()
+      ? Number(form.rescanInterval)
+      : null;
+    if (interval !== null && (!Number.isInteger(interval) || interval < 1)) {
+      setError('Rescan interval must be a whole number of minutes');
+      return;
+    }
 
-    await fetch('/api/backends/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: saved.id }),
-    });
+    setSaving(true);
+    try {
+      const method = form.id ? 'PUT' : 'POST';
+      const body = {
+        id: form.id,
+        name: form.name,
+        url,
+        authEnabled: form.authEnabled,
+        username: form.authEnabled ? form.username : undefined,
+        password: form.authEnabled && form.password ? form.password : undefined,
+        rescanInterval: interval,
+      };
+      const res = await fetch('/api/backends', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save backend');
 
-    setBackends(await fetch('/api/backends').then((r) => r.json()));
-    setForm({ authEnabled: false, rescanInterval: null });
-    // Scroll to top or show success toast (todo)
+      await refreshBackends();
+      setForm(emptyForm);
+      setMessage(form.id ? 'Backend updated' : 'Backend added');
+
+      if (!form.id) {
+        await rescan(data.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save backend');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function rescan(id: number) {
-    const btn = document.getElementById(`rescan-${id}`) as HTMLButtonElement;
-    if (btn) btn.disabled = true;
-    
+    setError('');
+    setMessage('');
+    setScanningId(id);
     try {
-        await fetch('/api/backends/scan', {
+      const res = await fetch('/api/backends/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
-        });
-        // You might want to use a toast here
-        alert('Rescan triggered successfully');
-    } catch (error) {
-        console.error(error);
-        alert('Failed to trigger rescan');
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Scan failed');
+      await refreshBackends();
+      setMessage('Scan completed');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to scan backend');
     } finally {
-        if (btn) btn.disabled = false;
+      setScanningId(null);
     }
   }
 
   async function deleteBackend() {
     if (deleteId === null) return;
-    await fetch('/api/backends', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: deleteId }),
-    });
-    setBackends(await fetch('/api/backends').then((r) => r.json()));
-    setDeleteId(null);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch('/api/backends', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: deleteId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete backend');
+      await refreshBackends();
+      setMessage('Backend deleted');
+      if (form.id === deleteId) setForm(emptyForm);
+      setDeleteId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete backend');
+    }
   }
 
-  function edit(b: Backend) {
+  function edit(backend: Backend) {
     setForm({
-      id: b.id,
-      name: b.name,
-      url: b.url,
-      authEnabled: b.authEnabled,
-      username: b.username,
-      password: b.password,
-      rescanInterval: b.rescanInterval ?? null,
+      id: backend.id,
+      name: backend.name,
+      url: backend.url,
+      authEnabled: Boolean(backend.authEnabled),
+      username: backend.username || '',
+      password: '',
+      rescanInterval:
+        backend.rescanInterval === null || backend.rescanInterval === undefined
+          ? ''
+          : String(backend.rescanInterval),
     });
-    setUrlError('');
+    setError('');
+    setMessage('');
     document.getElementById('backend-form')?.scrollIntoView({ behavior: 'smooth' });
   }
 
-  function cancel() {
-    setForm({ authEnabled: false, rescanInterval: null });
-    setUrlError('');
-  }
+  const totalIndexed = backends.reduce(
+    (total, backend) => total + (backend.fileCount ?? 0),
+    0
+  );
 
   return (
-    <div className="container max-w-7xl mx-auto px-4 py-12 space-y-8">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Admin Panel</h1>
-          <p className="text-muted-foreground">Manage your storage backends and settings.</p>
-        </div>
-        <Button variant="destructive" onClick={() => signOut({ callbackUrl: '/' })}>
-          <LogOut className="mr-2 h-4 w-4" />
-          Sign Out
-        </Button>
-      </div>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 md:px-6">
+      <Card className="shadow-sm">
+        <CardHeader className="gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            <Badge variant="secondary" className="w-fit gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Admin
+            </Badge>
+            <div>
+              <CardTitle className="text-2xl">Storage backends</CardTitle>
+              <CardDescription>
+                Connect HTTP directory listings, protect credentials, and keep
+                the SQLite index fresh.
+              </CardDescription>
+            </div>
+          </div>
+          <Button variant="outline" onClick={() => signOut({ callbackUrl: '/' })}>
+            <LogOut className="h-4 w-4" />
+            Sign Out
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Backends</div>
+              <div className="mt-2 text-2xl font-semibold">{backends.length}</div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Indexed Entries</div>
+              <div className="mt-2 text-2xl font-semibold">
+                {totalIndexed.toLocaleString()}
+              </div>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="text-sm text-muted-foreground">Protected Secrets</div>
+              <div className="mt-2 text-2xl font-semibold">
+                {backends.filter((backend) => backend.hasPassword).length}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="grid gap-8 md:grid-cols-2">
-        {/* Backends List */}
-        <Card className="md:col-span-2 lg:col-span-1">
+      {(error || message) && (
+        <Card
+          className={
+            error
+              ? 'border-destructive/40 bg-destructive/10 shadow-sm'
+              : 'border-primary/30 bg-primary/10 shadow-sm'
+          }
+        >
+          <CardContent
+            className={
+              error
+                ? 'flex items-center gap-2 p-4 text-sm text-destructive'
+                : 'flex items-center gap-2 p-4 text-sm text-primary'
+            }
+          >
+            {error ? (
+              <AlertCircle className="h-4 w-4" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            {error || message}
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <Card className="shadow-sm">
           <CardHeader>
             <CardTitle>Configured Backends</CardTitle>
             <CardDescription>
-                List of connected storage providers.
+              Scans read directory listings into the local database.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             {loading ? (
-                <div className="flex justify-center p-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
+              <div className="flex min-h-64 items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
             ) : backends.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                    No backends configured yet.
+              <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+                <Server className="h-10 w-10 text-muted-foreground" />
+                <div>
+                  <p className="font-medium">No backends yet</p>
+                  <p className="text-sm text-muted-foreground">
+                    Add your first backend to start indexing.
+                  </p>
                 </div>
+              </div>
             ) : (
-                <div className="space-y-4">
-                    {backends.map((b) => (
-                        <div key={b.id} className="flex flex-col space-y-2 p-4 border rounded-lg bg-card hover:bg-accent/50 transition-colors">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-3">
-                                    <div className="bg-primary/10 text-primary p-2 rounded-full">
-                                        <Server className="h-4 w-4" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-semibold">{b.name}</h4>
-                                        <a href={b.url} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground hover:underline">
-                                            {b.url}
-                                        </a>
-                                    </div>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                    <Button variant="ghost" size="icon" onClick={() => edit(b)}>
-                                        <Edit2 className="h-4 w-4" />
-                                    </Button>
-                                    <Dialog open={deleteId === b.id} onOpenChange={(open) => setDeleteId(open ? b.id : null)}>
-                                        <DialogTrigger asChild>
-                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </DialogTrigger>
-                                        <DialogContent>
-                                            <DialogHeader>
-                                                <DialogTitle>Delete Backend</DialogTitle>
-                                                <DialogDescription>
-                                                    Are you sure you want to delete <strong>{b.name}</strong>? This action cannot be undone.
-                                                </DialogDescription>
-                                            </DialogHeader>
-                                            <DialogFooter>
-                                                <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
-                                                <Button variant="destructive" onClick={deleteBackend}>Delete</Button>
-                                            </DialogFooter>
-                                        </DialogContent>
-                                    </Dialog>
-                                </div>
-                            </div>
-                            <div className="flex items-center justify-between text-xs pt-2">
-                                <div className="flex gap-2">
-                                    <Badge variant="outline">
-                                        {b.rescanInterval == null ? 'Auto-scan disabled' : `Scan every ${b.rescanInterval}m`}
-                                    </Badge>
-                                    {b.authEnabled && (
-                                        <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 border-transparent">
-                                            Auth
-                                        </Badge>
-                                    )}
-                                </div>
-                                <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    id={`rescan-${b.id}`}
-                                    onClick={() => rescan(b.id)}
-                                    className="h-7 text-xs"
-                                >
-                                    <RefreshCw className="mr-1 h-3 w-3" />
-                                    Rescan
-                                </Button>
-                            </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="hidden md:table-cell">Index</TableHead>
+                    <TableHead className="hidden md:table-cell">Scan</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {backends.map((backend) => (
+                    <TableRow key={backend.id}>
+                      <TableCell>
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-medium">
+                              {backend.name}
+                            </span>
+                            {backend.authEnabled ? (
+                              <Badge variant="outline">Auth</Badge>
+                            ) : null}
+                          </div>
+                          <a
+                            href={backend.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-xs text-muted-foreground hover:underline"
+                          >
+                            {backend.url}
+                          </a>
                         </div>
-                    ))}
-                </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {(backend.fileCount ?? 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <div className="space-y-1 text-sm">
+                          <div>{formatDate(backend.scannedAt)}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {backend.rescanInterval
+                              ? `Every ${backend.rescanInterval}m`
+                              : 'Manual'}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => edit(backend)}
+                            title="Edit backend"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => rescan(backend.id)}
+                            disabled={scanningId === backend.id}
+                            title="Rescan backend"
+                          >
+                            {scanningId === backend.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Dialog
+                            open={deleteId === backend.id}
+                            onOpenChange={(open) =>
+                              setDeleteId(open ? backend.id : null)
+                            }
+                          >
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:text-destructive"
+                                title="Delete backend"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Delete backend</DialogTitle>
+                                <DialogDescription>
+                                  Delete {backend.name} and its indexed files
+                                  from the local database.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <DialogFooter>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setDeleteId(null)}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  onClick={deleteBackend}
+                                >
+                                  Delete
+                                </Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
 
-        {/* Add/Edit Form */}
-        <Card className="md:col-span-2 lg:col-span-1" id="backend-form">
+        <Card className="shadow-sm" id="backend-form">
           <CardHeader>
-            <CardTitle>{form.id ? 'Edit Backend' : 'Add New Backend'}</CardTitle>
+            <CardTitle>{form.id ? 'Edit Backend' : 'Add Backend'}</CardTitle>
             <CardDescription>
-                Configure connection details for a new storage backend.
+              Use an HTTP or HTTPS directory listing as a file source.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-5">
             <div className="space-y-2">
-                <Label htmlFor="name">Name</Label>
-                <Input
-                    id="name"
-                    placeholder="My Documents"
-                    value={form.name || ''}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                value={form.name}
+                placeholder="Media server"
+                onChange={(event) =>
+                  setForm({ ...form, name: event.target.value })
+                }
+                disabled={saving}
+              />
             </div>
 
             <div className="space-y-2">
-                <Label htmlFor="url">URL</Label>
-                <Input
-                    id="url"
-                    placeholder="http://localhost:8080"
-                    value={form.url || ''}
-                    onChange={(e) => {
-                        const url = e.target.value;
-                        setForm({ ...form, url });
-                        if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
-                          setUrlError('URL must start with http:// or https://');
-                        } else {
-                          setUrlError('');
-                        }
-                    }}
-                />
-                {urlError && <p className="text-sm text-destructive">{urlError}</p>}
+              <Label htmlFor="url">URL</Label>
+              <Input
+                id="url"
+                value={form.url}
+                placeholder="http://localhost:8080/files"
+                onChange={(event) =>
+                  setForm({ ...form, url: event.target.value })
+                }
+                disabled={saving}
+              />
             </div>
 
-            <div className="flex items-center justify-between space-x-2">
-                <Label htmlFor="authEnabled" className="flex flex-col space-y-1">
-                    <span>Enable Authentication</span>
-                    <span className="font-normal text-xs text-muted-foreground">If the backend requires basic auth credentials.</span>
-                </Label>
-                <Switch
-                    id="authEnabled"
-                    checked={form.authEnabled || false}
-                    onCheckedChange={(checked) => setForm({ ...form, authEnabled: checked })}
-                />
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="authEnabled">Basic authentication</Label>
+                <p className="text-xs text-muted-foreground">
+                  Credentials are stored encrypted and used only server-side.
+                </p>
+              </div>
+              <Switch
+                id="authEnabled"
+                checked={form.authEnabled}
+                onCheckedChange={(checked) =>
+                  setForm({ ...form, authEnabled: checked })
+                }
+                disabled={saving}
+              />
             </div>
 
             {form.authEnabled && (
-                <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
-                    <div className="space-y-2">
-                        <Label htmlFor="username">Username</Label>
-                        <Input
-                            id="username"
-                            value={form.username || ''}
-                            onChange={(e) => setForm({ ...form, username: e.target.value })}
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="password">Password</Label>
-                        <Input
-                            id="password"
-                            type="password"
-                            value={form.password || ''}
-                            onChange={(e) => setForm({ ...form, password: e.target.value })}
-                        />
-                    </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <Input
+                    id="username"
+                    value={form.username}
+                    onChange={(event) =>
+                      setForm({ ...form, username: event.target.value })
+                    }
+                    disabled={saving}
+                  />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">
+                    Password
+                    {form.id && activeBackend?.hasPassword ? (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        leave blank to keep
+                      </span>
+                    ) : null}
+                  </Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={form.password}
+                    onChange={(event) =>
+                      setForm({ ...form, password: event.target.value })
+                    }
+                    disabled={saving}
+                  />
+                </div>
+              </div>
             )}
 
-            <div className="space-y-3">
-                <Label>Auto-rescan Interval</Label>
-                <div className="flex items-center space-x-4">
-                     <div className="flex items-center space-x-2">
-                        <input
-                            type="radio"
-                            id="rescan-never"
-                            className="text-primary focus:ring-primary"
-                            checked={form.rescanInterval == null}
-                            onChange={() => setForm({ ...form, rescanInterval: null })}
-                        />
-                        <Label htmlFor="rescan-never" className="font-normal cursor-pointer">Never</Label>
-                     </div>
-                     <div className="flex items-center space-x-2">
-                        <input
-                            type="radio"
-                            id="rescan-interval"
-                             className="text-primary focus:ring-primary"
-                            checked={form.rescanInterval != null}
-                            onChange={() => setForm({ ...form, rescanInterval: form.rescanInterval ?? 5 })}
-                        />
-                         <Label htmlFor="rescan-interval" className="font-normal cursor-pointer">Every</Label>
-                     </div>
-                     <div className="flex items-center space-x-2">
-                        <Input
-                            type="number"
-                            min="1"
-                            disabled={form.rescanInterval == null}
-                            value={form.rescanInterval ?? ''}
-                            onChange={(e) => setForm({ ...form, rescanInterval: Number(e.target.value) })}
-                            className="w-20 h-8"
-                        />
-                        <span className="text-sm text-muted-foreground">minutes</span>
-                     </div>
-                </div>
+            <Separator />
+
+            <div className="space-y-2">
+              <Label htmlFor="rescanInterval">Auto-rescan interval</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="rescanInterval"
+                  type="number"
+                  min="1"
+                  placeholder="Manual"
+                  value={form.rescanInterval}
+                  onChange={(event) =>
+                    setForm({ ...form, rescanInterval: event.target.value })
+                  }
+                  disabled={saving}
+                />
+                <span className="text-sm text-muted-foreground">minutes</span>
+              </div>
             </div>
           </CardContent>
-          <CardFooter className="flex justify-end space-x-2">
-            {form.id && (
-                <Button variant="outline" onClick={cancel}>
-                    Cancel
-                </Button>
-            )}
-            <Button onClick={save}>
-                {form.id ? 'Update Backend' : 'Add Backend'}
+          <CardFooter className="justify-between gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setForm(emptyForm)}
+              disabled={saving}
+            >
+              Clear
+            </Button>
+            <Button onClick={save} disabled={saving}>
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {form.id ? 'Update Backend' : 'Add Backend'}
             </Button>
           </CardFooter>
         </Card>
