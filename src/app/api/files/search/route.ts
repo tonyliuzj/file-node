@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { escapeLike } from '@/lib/security';
+import { requestHasTurnstileClearance } from '@/lib/turnstile';
 
 export function GET(req: NextRequest) {
   try {
+    if (!requestHasTurnstileClearance(req, 'search')) {
+      return NextResponse.json(
+        { error: 'Turnstile verification required' },
+        { status: 403 }
+      );
+    }
+
     const q = (req.nextUrl.searchParams.get('q') || '').trim().slice(0, 200);
     if (!q) {
       return NextResponse.json([]);

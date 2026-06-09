@@ -50,6 +50,13 @@ db.prepare(`
   );
 `).run();
 
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
+`).run();
+
 db.prepare(
   'CREATE INDEX IF NOT EXISTS idx_files_backend_path ON files (backendId, path)'
 ).run();

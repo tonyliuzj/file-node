@@ -5,6 +5,108 @@ import db from '@/utils/db';
 import { authOptions } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 import { requireAdmin } from '@/lib/admin';
+import { getTurnstileSettings, updateTurnstileSettings } from '@/lib/turnstile';
+
+export async function GET() {
+  try {
+    const authErr = await requireAdmin();
+    if (authErr) return authErr;
+
+    return NextResponse.json({
+      turnstile: getTurnstileSettings(),
+    });
+  } catch (error) {
+    console.error('Error fetching admin settings:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch settings' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const authErr = await requireAdmin();
+    if (authErr) return authErr;
+
+    const body = (await req.json()) as {
+      turnstile?: {
+        siteKey?: unknown;
+        secretKey?: unknown;
+        clearSecretKey?: unknown;
+        requireBrowse?: unknown;
+        requireSearch?: unknown;
+        requireAdminLogin?: unknown;
+      };
+    };
+    const turnstile = body.turnstile || {};
+    const currentSettings = getTurnstileSettings();
+    const siteKeyProvided = typeof turnstile.siteKey === 'string';
+    const siteKey = siteKeyProvided
+      ? String(turnstile.siteKey).trim()
+      : currentSettings.siteKey;
+    const secretKey = typeof turnstile.secretKey === 'string'
+      ? turnstile.secretKey.trim()
+      : '';
+    const clearSecretKey = turnstile.clearSecretKey === true;
+    const requireBrowse =
+      typeof turnstile.requireBrowse === 'boolean'
+        ? turnstile.requireBrowse
+        : currentSettings.requireBrowse;
+    const requireSearch =
+      typeof turnstile.requireSearch === 'boolean'
+        ? turnstile.requireSearch
+        : currentSettings.requireSearch;
+    const requireAdminLogin =
+      typeof turnstile.requireAdminLogin === 'boolean'
+        ? turnstile.requireAdminLogin
+        : currentSettings.requireAdminLogin;
+    const hasSecretAfterSave = clearSecretKey
+      ? Boolean(secretKey)
+      : Boolean(secretKey || currentSettings.hasSecretKey);
+
+    if ((requireBrowse || requireSearch || requireAdminLogin) && !siteKey) {
+      return NextResponse.json(
+        { error: 'Turnstile site key is required before enabling protection' },
+        { status: 400 }
+      );
+    }
+    if (
+      (requireBrowse || requireSearch || requireAdminLogin) &&
+      !hasSecretAfterSave
+    ) {
+      return NextResponse.json(
+        { error: 'Turnstile secret key is required before enabling protection' },
+        { status: 400 }
+      );
+    }
+
+    updateTurnstileSettings({
+      siteKey: siteKeyProvided ? siteKey : undefined,
+      secretKey,
+      clearSecretKey,
+      requireBrowse:
+        typeof turnstile.requireBrowse === 'boolean' ? requireBrowse : undefined,
+      requireSearch:
+        typeof turnstile.requireSearch === 'boolean' ? requireSearch : undefined,
+      requireAdminLogin:
+        typeof turnstile.requireAdminLogin === 'boolean'
+          ? requireAdminLogin
+          : undefined,
+    });
+
+    return NextResponse.json({
+      success: true,
+      turnstile: getTurnstileSettings(),
+    });
+  } catch (error) {
+    console.error('Error updating Turnstile settings:', error);
+    return NextResponse.json(
+      { error: 'Failed to update Turnstile settings' },
+      { status: 500 }
+    );
+  }
+}
 
 export async function PUT(req: NextRequest) {
   try {

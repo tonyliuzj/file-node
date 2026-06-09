@@ -2,8 +2,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { normalizeVirtualPath, safeDecodeURIComponent } from '@/lib/security';
+import { requestHasTurnstileClearance } from '@/lib/turnstile';
 
 export async function GET(request: NextRequest) {
+  if (!requestHasTurnstileClearance(request, 'browse')) {
+    return NextResponse.json(
+      { error: 'Turnstile verification required' },
+      { status: 403 }
+    );
+  }
+
   const url = request.nextUrl;
 
   const backendIdParam = url.searchParams.get('backendId');

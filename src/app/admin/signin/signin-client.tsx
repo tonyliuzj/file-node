@@ -16,26 +16,40 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import TurnstileWidget from '@/components/turnstile-widget';
 
-function SignInForm() {
+type SignInClientProps = {
+  turnstileSiteKey: string;
+  requireTurnstile: boolean;
+};
+
+function SignInForm({ turnstileSiteKey, requireTurnstile }: SignInClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/admin/backends';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+
+    if (requireTurnstile && !turnstileToken) {
+      setError('Complete Turnstile verification before signing in');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
       const result = await signIn('credentials', {
         username,
         password,
+        turnstileToken,
         redirect: false,
       });
 
@@ -48,6 +62,7 @@ function SignInForm() {
     } catch {
       setError('Sign in failed');
     } finally {
+      setTurnstileToken('');
       setIsLoading(false);
     }
   };
@@ -92,13 +107,25 @@ function SignInForm() {
                 required
               />
             </div>
+            {requireTurnstile && (
+              <TurnstileWidget
+                siteKey={turnstileSiteKey}
+                disabled={isLoading}
+                onVerify={setTurnstileToken}
+                onReset={() => setTurnstileToken('')}
+              />
+            )}
             {error && (
               <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <AlertCircle className="h-4 w-4" />
                 {error}
               </div>
             )}
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isLoading || (requireTurnstile && !turnstileToken)}
+            >
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Sign In
             </Button>
@@ -123,10 +150,10 @@ function SignInFallback() {
   );
 }
 
-export default function SignInClient() {
+export default function SignInClient(props: SignInClientProps) {
   return (
     <Suspense fallback={<SignInFallback />}>
-      <SignInForm />
+      <SignInForm {...props} />
     </Suspense>
   );
 }
