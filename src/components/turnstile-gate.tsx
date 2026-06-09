@@ -2,7 +2,8 @@
 
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,23 +32,20 @@ export default function TurnstileGate({
 }: TurnstileGateProps) {
   const router = useRouter();
   const [token, setToken] = useState('');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleVerify = useCallback((value: string) => {
     setToken(value);
-    setError('');
   }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!token) {
-      setError('Complete the verification before continuing');
+      toast.error('Complete the verification before continuing');
       return;
     }
 
     setLoading(true);
-    setError('');
 
     try {
       const response = await fetch('/api/turnstile/verify', {
@@ -62,7 +60,7 @@ export default function TurnstileGate({
 
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed');
+      toast.error(err instanceof Error ? err.message : 'Verification failed');
       setToken('');
       setLoading(false);
     }
@@ -89,12 +87,6 @@ export default function TurnstileGate({
               onVerify={handleVerify}
               onReset={() => setToken('')}
             />
-            {error && (
-              <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                <AlertCircle className="h-4 w-4" />
-                {error}
-              </div>
-            )}
             <Button type="submit" className="w-full" disabled={loading || !token}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Continue

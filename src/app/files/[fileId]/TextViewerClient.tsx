@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { Light as SyntaxHighlighter } from 'react-syntax-highlighter';
 import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
-import { Loader2, Download, AlertCircle } from 'lucide-react';
+import { Loader2, Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -18,7 +19,7 @@ type ThemeStyle = SyntaxHighlighterProps['style'];
 export default function TextViewerClient({ fileUrl, downloadUrl, fileName }: TextViewerProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState<boolean>(false);
   const [themeStyle, setThemeStyle] = useState<ThemeStyle | null>(null);
 
   useEffect(() => {
@@ -47,9 +48,11 @@ export default function TextViewerClient({ fileUrl, downloadUrl, fileName }: Tex
         }
         const text = await response.text();
         setContent(text);
+        setLoadFailed(false);
         setLoading(false);
         } catch {
-          setError('Failed to load file content');
+          toast.error('Failed to load file content');
+          setLoadFailed(true);
           setLoading(false);
         }
     };
@@ -65,13 +68,11 @@ export default function TextViewerClient({ fileUrl, downloadUrl, fileName }: Tex
     );
   }
 
-  if (error) {
+  if (loadFailed) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/40 p-4">
         <Card className="w-full max-w-md shadow-sm">
           <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-            <AlertCircle className="h-8 w-8 text-destructive" />
-            <p className="font-medium">{error}</p>
             <Button asChild>
             <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />

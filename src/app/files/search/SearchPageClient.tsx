@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
-  AlertCircle,
   Database,
   File,
   FileAudio,
@@ -17,6 +16,7 @@ import {
   Loader2,
   Search,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -103,7 +103,6 @@ export default function SearchPageClient() {
   const [backends, setBackends] = useState<Backend[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -115,7 +114,7 @@ export default function SearchPageClient() {
         const data = (await backendsRes.json()) as Backend[];
         if (mounted) setBackends(data);
       } catch {
-        if (mounted) setError('Unable to load backend metadata');
+        if (mounted) toast.error('Unable to load backend metadata');
       }
     }
 
@@ -129,7 +128,6 @@ export default function SearchPageClient() {
     let mounted = true;
 
     async function searchFiles() {
-      setError('');
       if (!q.trim()) {
         setResults([]);
         return;
@@ -147,7 +145,7 @@ export default function SearchPageClient() {
       } catch {
         if (mounted) {
           setResults([]);
-          setError('Search failed against the file index');
+          toast.error('Search failed against the file index');
         }
       } finally {
         if (mounted) setLoading(false);
@@ -217,15 +215,6 @@ export default function SearchPageClient() {
           </form>
         </CardContent>
       </Card>
-
-      {error && (
-        <Card className="border-destructive/40 bg-destructive/10 shadow-sm">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
-            <AlertCircle className="h-4 w-4" />
-            {error}
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="shadow-sm">
         <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">

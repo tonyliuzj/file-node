@@ -4,12 +4,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
-  AlertCircle,
-  CheckCircle2,
   Loader2,
   ShieldCheck,
   Shield,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -50,8 +49,6 @@ export default function SettingsPage() {
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [turnstile, setTurnstile] = useState<TurnstileSettings>(
     emptyTurnstileSettings
@@ -60,8 +57,6 @@ export default function SettingsPage() {
   const [clearTurnstileSecretKey, setClearTurnstileSecretKey] = useState(false);
   const [turnstileLoading, setTurnstileLoading] = useState(true);
   const [turnstileSaving, setTurnstileSaving] = useState(false);
-  const [turnstileError, setTurnstileError] = useState('');
-  const [turnstileSuccess, setTurnstileSuccess] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -81,9 +76,7 @@ export default function SettingsPage() {
         }
       } catch (err) {
         if (mounted) {
-          setTurnstileError(
-            err instanceof Error ? err.message : 'Failed to load settings'
-          );
+          toast.error(err instanceof Error ? err.message : 'Failed to load settings');
         }
       } finally {
         if (mounted) setTurnstileLoading(false);
@@ -98,19 +91,17 @@ export default function SettingsPage() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError('');
-    setSuccess('');
 
     if (!currentPassword) {
-      setError('Current password is required');
+      toast.error('Current password is required');
       return;
     }
     if (!newUsername.trim() && !newPassword) {
-      setError('Provide a new username or password');
+      toast.error('Provide a new username or password');
       return;
     }
     if (newPassword && newPassword !== confirmPassword) {
-      setError('New passwords do not match');
+      toast.error('New passwords do not match');
       return;
     }
     setLoading(true);
@@ -131,7 +122,7 @@ export default function SettingsPage() {
         throw new Error(data.error || 'Failed to update credentials');
       }
 
-      setSuccess('Credentials updated. Redirecting to sign in...');
+      toast.success('Credentials updated. Redirecting to sign in...');
       setCurrentPassword('');
       setNewUsername('');
       setNewPassword('');
@@ -142,15 +133,13 @@ export default function SettingsPage() {
         router.push('/admin/signin');
       }, 1200);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update credentials');
+      toast.error(err instanceof Error ? err.message : 'Failed to update credentials');
       setLoading(false);
     }
   };
 
   const handleTurnstileSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setTurnstileError('');
-    setTurnstileSuccess('');
     setTurnstileSaving(true);
 
     try {
@@ -177,9 +166,9 @@ export default function SettingsPage() {
       setTurnstile(data.turnstile || emptyTurnstileSettings);
       setTurnstileSecretKey('');
       setClearTurnstileSecretKey(false);
-      setTurnstileSuccess('Turnstile settings updated');
+      toast.success('Turnstile settings updated');
     } catch (err) {
-      setTurnstileError(
+      toast.error(
         err instanceof Error ? err.message : 'Failed to update Turnstile settings'
       );
     } finally {
@@ -209,31 +198,6 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
       </Card>
-
-      {(error || success) && (
-        <Card
-          className={
-            error
-              ? 'border-destructive/40 bg-destructive/10 shadow-sm'
-              : 'border-primary/30 bg-primary/10 shadow-sm'
-          }
-        >
-          <CardContent
-            className={
-              error
-                ? 'flex items-center gap-2 p-4 text-sm text-destructive'
-                : 'flex items-center gap-2 p-4 text-sm text-primary'
-            }
-          >
-            {error ? (
-              <AlertCircle className="h-4 w-4" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            {error || success}
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="shadow-sm">
         <form onSubmit={handleSubmit}>
@@ -305,31 +269,6 @@ export default function SettingsPage() {
           </CardFooter>
         </form>
       </Card>
-
-      {(turnstileError || turnstileSuccess) && (
-        <Card
-          className={
-            turnstileError
-              ? 'border-destructive/40 bg-destructive/10 shadow-sm'
-              : 'border-primary/30 bg-primary/10 shadow-sm'
-          }
-        >
-          <CardContent
-            className={
-              turnstileError
-                ? 'flex items-center gap-2 p-4 text-sm text-destructive'
-                : 'flex items-center gap-2 p-4 text-sm text-primary'
-            }
-          >
-            {turnstileError ? (
-              <AlertCircle className="h-4 w-4" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            {turnstileError || turnstileSuccess}
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="shadow-sm">
         <form onSubmit={handleTurnstileSubmit}>

@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  AlertCircle,
   ArrowLeft,
   Database,
   File,
@@ -18,6 +17,7 @@ import {
   HardDrive,
   Search,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -142,7 +142,6 @@ export default function ExplorerClient() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loadingBackends, setLoadingBackends] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
-  const [error, setError] = useState('');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -161,7 +160,7 @@ export default function ExplorerClient() {
           router.replace(`/files/browse?backendId=${data[0].id}&path=%2F`);
         }
       } catch {
-        if (mounted) setError('Unable to load storage backends');
+        if (mounted) toast.error('Unable to load storage backends');
       } finally {
         if (mounted) setLoadingBackends(false);
       }
@@ -182,7 +181,6 @@ export default function ExplorerClient() {
     let mounted = true;
     async function loadEntries() {
       setLoadingEntries(true);
-      setError('');
       setEntries([]);
       try {
         const res = await fetch(
@@ -194,7 +192,7 @@ export default function ExplorerClient() {
         if (!mounted) return;
         setEntries(data);
       } catch {
-        if (mounted) setError('Unable to load this directory from the index');
+        if (mounted) toast.error('Unable to load this directory from the index');
       } finally {
         if (mounted) setLoadingEntries(false);
       }
@@ -368,15 +366,6 @@ export default function ExplorerClient() {
             </Link>
           </Button>
         </div>
-
-        {error && (
-          <div className="border-b bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              {error}
-            </div>
-          </div>
-        )}
 
         {!backendId || Number.isNaN(backendId) ? (
           <div className="flex flex-1 items-center justify-center p-4">

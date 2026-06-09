@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { signOut } from 'next-auth/react';
 import {
-  AlertCircle,
-  CheckCircle2,
   Edit2,
   Loader2,
   LogOut,
@@ -13,6 +11,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -101,8 +100,6 @@ export default function AdminClient() {
   const [saving, setSaving] = useState(false);
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
 
   async function refreshBackends() {
     const res = await fetch('/api/backends', { cache: 'no-store' });
@@ -114,14 +111,13 @@ export default function AdminClient() {
     let mounted = true;
     async function load() {
       setLoading(true);
-      setError('');
       try {
         const res = await fetch('/api/backends', { cache: 'no-store' });
         if (!res.ok) throw new Error('Failed to load backends');
         const data = (await res.json()) as Backend[];
         if (mounted) setBackends(data);
       } catch {
-        if (mounted) setError('Unable to load backends');
+        if (mounted) toast.error('Unable to load backends');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -138,16 +134,13 @@ export default function AdminClient() {
   );
 
   async function save() {
-    setError('');
-    setMessage('');
-
     const url = normalizeUrl(form.url);
     if (!url) {
-      setError('Backend URL is required');
+      toast.error('Backend URL is required');
       return;
     }
     if (form.authEnabled && (!form.username.trim() || (!form.password && !activeBackend?.hasPassword))) {
-      setError('Username and password are required when authentication is enabled');
+      toast.error('Username and password are required when authentication is enabled');
       return;
     }
 
@@ -155,7 +148,7 @@ export default function AdminClient() {
       ? Number(form.rescanInterval)
       : null;
     if (interval !== null && (!Number.isInteger(interval) || interval < 1)) {
-      setError('Rescan interval must be a whole number of minutes');
+      toast.error('Rescan interval must be a whole number of minutes');
       return;
     }
 
@@ -181,21 +174,19 @@ export default function AdminClient() {
 
       await refreshBackends();
       setForm(emptyForm);
-      setMessage(form.id ? 'Backend updated' : 'Backend added');
+      toast.success(form.id ? 'Backend updated' : 'Backend added');
 
       if (!form.id) {
         await rescan(data.id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save backend');
+      toast.error(err instanceof Error ? err.message : 'Failed to save backend');
     } finally {
       setSaving(false);
     }
   }
 
   async function rescan(id: number) {
-    setError('');
-    setMessage('');
     setScanningId(id);
     try {
       const res = await fetch('/api/backends/scan', {
@@ -206,9 +197,9 @@ export default function AdminClient() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Scan failed');
       await refreshBackends();
-      setMessage('Scan completed');
+      toast.success('Scan completed');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to scan backend');
+      toast.error(err instanceof Error ? err.message : 'Failed to scan backend');
     } finally {
       setScanningId(null);
     }
@@ -216,8 +207,6 @@ export default function AdminClient() {
 
   async function deleteBackend() {
     if (deleteId === null) return;
-    setError('');
-    setMessage('');
     try {
       const res = await fetch('/api/backends', {
         method: 'DELETE',
@@ -227,11 +216,11 @@ export default function AdminClient() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete backend');
       await refreshBackends();
-      setMessage('Backend deleted');
+      toast.success('Backend deleted');
       if (form.id === deleteId) setForm(emptyForm);
       setDeleteId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete backend');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete backend');
     }
   }
 
@@ -248,8 +237,6 @@ export default function AdminClient() {
           ? ''
           : String(backend.rescanInterval),
     });
-    setError('');
-    setMessage('');
     document.getElementById('backend-form')?.scrollIntoView({ behavior: 'smooth' });
   }
 
@@ -301,31 +288,6 @@ export default function AdminClient() {
           </div>
         </CardContent>
       </Card>
-
-      {(error || message) && (
-        <Card
-          className={
-            error
-              ? 'border-destructive/40 bg-destructive/10 shadow-sm'
-              : 'border-primary/30 bg-primary/10 shadow-sm'
-          }
-        >
-          <CardContent
-            className={
-              error
-                ? 'flex items-center gap-2 p-4 text-sm text-destructive'
-                : 'flex items-center gap-2 p-4 text-sm text-primary'
-            }
-          >
-            {error ? (
-              <AlertCircle className="h-4 w-4" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            {error || message}
-          </CardContent>
-        </Card>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="shadow-sm">

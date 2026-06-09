@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Play, Pause, Music, Download, AlertCircle } from 'lucide-react';
+import { Play, Pause, Music, Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,7 +18,6 @@ export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: Au
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [error, setError] = useState<string | null>(null);
 
   const togglePlay = () => {
     if (audioRef.current) {
@@ -25,7 +25,7 @@ export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: Au
         audioRef.current.pause();
       } else {
         audioRef.current.play().catch(err => {
-          setError('Failed to play audio: ' + err.message);
+          toast.error('Failed to play audio: ' + err.message);
         });
       }
       setIsPlaying(!isPlaying);
@@ -61,13 +61,6 @@ export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: Au
 
   return (
     <div className="flex h-full flex-col items-center justify-center bg-muted/40 p-4">
-      {error && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <AlertCircle className="h-4 w-4" />
-          {error}
-        </div>
-      )}
-      
       <Card className="w-full max-w-md shadow-sm">
         <CardContent className="flex flex-col items-center p-8">
             <div className="mb-8 flex h-32 w-32 items-center justify-center rounded-md border bg-card">
@@ -85,7 +78,7 @@ export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: Au
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onEnded={() => setIsPlaying(false)}
-            onError={() => setError('Failed to load audio file')}
+            onError={() => toast.error('Failed to load audio file')}
             />
             
             <div className="w-full mb-6 space-y-2">

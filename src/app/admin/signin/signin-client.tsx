@@ -3,7 +3,8 @@
 import { Suspense, useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AlertCircle, Loader2, Shield } from 'lucide-react';
+import { Loader2, Shield } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -31,15 +32,13 @@ function SignInForm({ turnstileSiteKey, requireTurnstile }: SignInClientProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
-  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError('');
 
     if (requireTurnstile && !turnstileToken) {
-      setError('Complete Turnstile verification before signing in');
+      toast.error('Complete Turnstile verification before signing in');
       return;
     }
 
@@ -54,13 +53,13 @@ function SignInForm({ turnstileSiteKey, requireTurnstile }: SignInClientProps) {
       });
 
       if (result?.error) {
-        setError('Invalid username or password');
+        toast.error('Invalid username or password');
       } else if (result?.ok) {
         router.push(callbackUrl);
         router.refresh();
       }
     } catch {
-      setError('Sign in failed');
+      toast.error('Sign in failed');
     } finally {
       setTurnstileToken('');
       setIsLoading(false);
@@ -114,12 +113,6 @@ function SignInForm({ turnstileSiteKey, requireTurnstile }: SignInClientProps) {
                 onVerify={setTurnstileToken}
                 onReset={() => setTurnstileToken('')}
               />
-            )}
-            {error && (
-              <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                <AlertCircle className="h-4 w-4" />
-                {error}
-              </div>
             )}
             <Button
               type="submit"

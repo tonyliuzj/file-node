@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, Maximize, Minimize, Volume2, VolumeX, Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 
@@ -17,7 +18,7 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
 
@@ -27,7 +28,7 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
         videoRef.current.pause();
       } else {
         videoRef.current.play().catch(err => {
-          setError('Failed to play video: ' + err.message);
+          toast.error('Failed to play video: ' + err.message);
         });
       }
       setIsPlaying(!isPlaying);
@@ -116,12 +117,6 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
 
   return (
     <div className="flex flex-col h-full bg-black text-white relative group">
-      {error && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-destructive text-destructive-foreground rounded-lg shadow-lg">
-          {error}
-        </div>
-      )}
-      
       <div className="flex-1 flex items-center justify-center relative overflow-hidden">
         <video
           ref={videoRef}
@@ -129,13 +124,16 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={() => setIsPlaying(false)}
-          onError={() => setError('Failed to load video file')}
+          onError={() => {
+            toast.error('Failed to load video file');
+            setLoadFailed(true);
+          }}
           className="max-w-full max-h-full"
           onClick={togglePlay}
         />
-        
+
         {/* Play/Pause Overlay on Hover or Pause */}
-        {!isPlaying && !error && (
+        {!isPlaying && !loadFailed && (
           <div 
             className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer"
             onClick={togglePlay}

@@ -5,7 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/atom-one-dark.css';
-import { Loader2, Download, AlertCircle } from 'lucide-react';
+import { Loader2, Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,7 +20,7 @@ interface MarkdownViewerProps {
 export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }: MarkdownViewerProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchContent = async () => {
@@ -30,9 +31,11 @@ export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }:
         }
         const text = await response.text();
         setContent(text);
+        setLoadFailed(false);
         setLoading(false);
       } catch {
-        setError('Failed to load file content');
+        toast.error('Failed to load file content');
+        setLoadFailed(true);
         setLoading(false);
       }
     };
@@ -48,13 +51,11 @@ export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }:
     );
   }
 
-  if (error) {
+  if (loadFailed) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/40 p-4">
         <Card className="w-full max-w-md shadow-sm">
           <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-            <AlertCircle className="h-8 w-8 text-destructive" />
-            <p className="font-medium">{error}</p>
             <Button asChild>
             <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />

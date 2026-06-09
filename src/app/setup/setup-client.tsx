@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -21,22 +22,18 @@ export default function SetupClient() {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setError('');
-    setSuccess('');
 
     if (!password) {
-      setError('Password is required');
+      toast.error('Password is required');
       return;
     }
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      toast.error('Passwords do not match');
       return;
     }
 
@@ -53,7 +50,7 @@ export default function SetupClient() {
         throw new Error(data.error || 'Failed to complete setup');
       }
 
-      setSuccess('Admin account created. Signing in...');
+      toast.success('Admin account created. Signing in...');
       const result = await signIn('credentials', {
         username,
         password,
@@ -67,7 +64,7 @@ export default function SetupClient() {
         router.push('/admin/signin');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Setup failed');
+      toast.error(err instanceof Error ? err.message : 'Setup failed');
       setLoading(false);
     }
   }
@@ -127,22 +124,6 @@ export default function SetupClient() {
                 required
               />
             </div>
-            {(error || success) && (
-              <div
-                className={
-                  error
-                    ? 'flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive'
-                    : 'flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary'
-                }
-              >
-                {error ? (
-                  <AlertCircle className="h-4 w-4" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4" />
-                )}
-                {error || success}
-              </div>
-            )}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Create Admin
