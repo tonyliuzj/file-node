@@ -1,0 +1,20 @@
+services:
+  file-node:
+    image: ${DOCKER_IMAGE:-tonyliuzj/file-node:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: 0.0.0.0
+      PORT: ${CONTAINER_PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:-/app/data/data.db}
+    ports:
+      - "${HOST_PORT:-3000}:${CONTAINER_PORT:-3000}"
+    volumes:
+      - ./data:/app/data

@@ -19,17 +19,44 @@ File Node is a Next.js-powered self-hosted file explorer that indexes and browse
 
 ## Prerequisites
 
-- **Node.js** ≥18
-- **npm** or **yarn**
+- **Docker** with Compose v2 for the Docker install path
+- **Node.js** ≥18 and **npm** for direct/manual installs
 - **VPS** or server with public HTTPS (for production)
 - Shared HTTP/WebDAV storage backends with directory listing enabled
 
 ## Getting Started
 
-### Run by script (One Click Install)
+### Run by script
+
+The installer can set up either a direct systemd deployment or a Docker Compose deployment. The Docker path pulls `tonyliuzj/file-node:latest` from Docker Hub and falls back to a local build if the image is unavailable.
 
 ```bash
-curl -sSL https://github.com/tonyliuzj/file-node/releases/latest/download/file-node.sh -o file-node.sh && chmod +x file-node.sh && bash file-node.sh
+curl -fsSL https://raw.githubusercontent.com/tonyliuzj/file-node/main/file-node.sh -o file-node.sh
+chmod +x file-node.sh
+./file-node.sh
+```
+
+Useful installer overrides:
+
+```bash
+INSTALL_DIR=/opt/file-node HOST_PORT=8080 DOCKER_IMAGE=tonyliuzj/file-node:latest ./file-node.sh
+```
+
+### Docker Compose
+
+If Docker is already installed, you can run the app directly with Compose:
+
+```bash
+cp example.env.local .env.local
+mkdir -p data
+cat > .env <<EOF
+HOST_PORT=3000
+CONTAINER_PORT=3000
+DOCKER_IMAGE=tonyliuzj/file-node:latest
+APP_UID=$(id -u)
+APP_GID=$(id -g)
+EOF
+docker compose up -d
 ```
 
 ### Manual Installation
@@ -50,11 +77,12 @@ curl -sSL https://github.com/tonyliuzj/file-node/releases/latest/download/file-n
 3. **Environment variables**
 
    Copy `example.env.local` to `.env.local` if you want to override the port
-   or pin a credential-encryption secret. Turnstile keys are configured later
-   from the admin settings screen.
+   or pin a credential-encryption secret and SQLite path. Turnstile keys are
+   configured later from the admin settings screen.
 
    ```
    FILE_NODE_SECRET_KEY=optional-separate-secret-for-backend-credential-encryption
+   DATABASE_URL=data/data.db
    PORT=3000
    ```
 
@@ -77,6 +105,8 @@ curl -sSL https://github.com/tonyliuzj/file-node/releases/latest/download/file-n
 ```
 file-node/
 ├── .env.local               # your secrets
+├── Dockerfile
+├── docker-compose.yml
 ├── data/                    # SQLite database and generated local secret
 ├── next.config.ts
 ├── package.json
@@ -136,7 +166,11 @@ file-node/
 | Variable          | Description                             |
 | ----------------- | --------------------------------------- |
 | `FILE_NODE_SECRET_KEY` | Optional persistent server secret for backend credential encryption |
+| `DATABASE_URL` | SQLite database path. Defaults to `data/data.db`; Docker uses `/app/data/data.db` |
 | `PORT` | Optional port for local/systemd startup |
+| `HOST_PORT` | Docker Compose host port, used by `.env` |
+| `CONTAINER_PORT` | Docker Compose container port, used by `.env` |
+| `DOCKER_IMAGE` | Docker image to run. Defaults to `tonyliuzj/file-node:latest` |
 
 ### Initial Setup
 

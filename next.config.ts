@@ -2,22 +2,13 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  webpack(config, { isServer }) {
-    if (!isServer) {
-      const externals = Array.isArray(config.externals)
-        ? config.externals
-        : config.externals
-          ? [config.externals]
-          : [];
-
-      config.externals = [
-        ...externals,
-        {
-          canvas: '{}',
-          'canvas-prebuilt': '{}',
-        },
-      ];
-    }
+  output: 'standalone',
+  webpack(config) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      canvas: false,
+      'canvas-prebuilt': false,
+    };
 
     return config;
   },

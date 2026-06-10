@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { isProtectedSecret, protectSecret } from '@/lib/credentials';
 
@@ -9,7 +10,28 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const db = new Database(path.join(dataDir, 'data.db'));
+function resolveDatabasePath() {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+
+  if (!databaseUrl) {
+    return path.join(dataDir, 'data.db');
+  }
+
+  if (databaseUrl.startsWith('file:')) {
+    return fileURLToPath(databaseUrl);
+  }
+
+  if (path.isAbsolute(databaseUrl)) {
+    return databaseUrl;
+  }
+
+  return path.resolve(process.cwd(), databaseUrl);
+}
+
+const databasePath = resolveDatabasePath();
+fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+
+const db = new Database(databasePath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
