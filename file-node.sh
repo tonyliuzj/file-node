@@ -4,7 +4,7 @@ set -euo pipefail
 
 # ============================================================
 # TEMPLATE CONFIG
-# Replace these defaults, or override them with env vars.
+# Replace these placeholder values, or override them with env vars.
 # Example:
 #   APP_NAME=my-app GIT_REPO=https://github.com/me/my-app.git bash installer.sh
 # ============================================================
@@ -36,7 +36,7 @@ NODESOURCE_KEY_URL="https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
 DOCKER_KEYRING="/etc/apt/keyrings/docker.asc"
 DOCKER_SOURCE_FILE="/etc/apt/sources.list.d/docker.sources"
 
-# Wait 1 second before major steps to show install progress.
+# Wait 1 second before major steps to mock/show install progress.
 # Set STEP_DELAY=0 to disable.
 STEP_DELAY="${STEP_DELAY:-1}"
 
