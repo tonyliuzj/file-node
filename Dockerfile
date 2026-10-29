@@ -1,6 +1,10 @@
+# syntax=docker/dockerfile:1
+
 FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
+
+ARG NPM_VERSION=11.6.2
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -15,7 +19,8 @@ RUN apt-get update \
     librsvg2-dev \
     pkg-config \
     python3 \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g "npm@${NPM_VERSION}"
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -35,14 +40,15 @@ FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV HOSTNAME=0.0.0.0
-ENV PORT=3000
-ENV DATABASE_URL=/app/data/data.db
+ENV NODE_ENV=production \
+  NEXT_TELEMETRY_DISABLED=1 \
+  HOSTNAME=0.0.0.0 \
+  PORT=3000 \
+  DATABASE_URL=/app/data/data.db
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
+    gosu \
     libcairo2 \
     libgif7 \
     libjpeg62-turbo \
@@ -53,12 +59,14 @@ RUN apt-get update \
   && mkdir -p /app/data \
   && chown -R node:node /app/data
 
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 
-USER node
-
 EXPOSE 3000
+VOLUME ["/app/data"]
 
+# Starts as root only so the entrypoint can fix /app/data ownership, then runs the app as `node`.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server.js"]

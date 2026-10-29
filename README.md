@@ -28,23 +28,28 @@ File Node is a Next.js-powered self-hosted file explorer that indexes and browse
 
 ### Run by script
 
-The installer can set up either a direct systemd deployment or a Docker Compose deployment. The Docker path pulls `tonyliuzj/file-node:latest` from Docker Hub and falls back to a local build if the image is unavailable.
+For Linux servers (Debian/Ubuntu), download and run the installer. It supports both a direct systemd deployment and a Docker Compose deployment, and shows a menu: **Install**, **Update**, **Start**, **Stop**, **Restart**, **Status**, **Logs** and **Uninstall**.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tonyliuzj/file-node/main/file-node.sh -o file-node.sh
-chmod +x file-node.sh
-./file-node.sh
+curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://github.com/tonyliuzj/file-node/releases/latest/download/file-node.sh -o file-node.sh && chmod +x file-node.sh && bash file-node.sh
 ```
+
+The Docker path pulls `tonyliuzj/file-node:latest` from Docker Hub and falls back to a local build if the image is unavailable.
+
+To update, download a fresh `file-node.sh` with the command above and choose **Update**. It pulls the latest code (local edits to tracked files are stashed, never lost), then:
+
+- **Docker installs** stop a leftover direct (systemd) service if there is one, pull the newest image and restart the containers. If the host port is still being released by the old container, starting is retried automatically.
+- **Direct installs** reinstall dependencies, rebuild the app and restart the systemd service.
 
 Useful installer overrides:
 
 ```bash
-INSTALL_DIR=/opt/file-node HOST_PORT=8080 DOCKER_IMAGE=tonyliuzj/file-node:latest ./file-node.sh
+INSTALL_DIR=/opt/file-node HOST_PORT=8080 DOCKER_IMAGE=tonyliuzj/file-node:latest bash file-node.sh
 ```
 
 ### Docker Compose
 
-If Docker is already installed, you can run the app directly with Compose:
+If Docker is already installed, you can run the app directly with Compose. The image is published to Docker Hub for `linux/amd64` and `linux/arm64`.
 
 ```bash
 cp example.env.local .env.local
@@ -53,11 +58,14 @@ cat > .env <<EOF
 HOST_PORT=3000
 CONTAINER_PORT=3000
 DOCKER_IMAGE=tonyliuzj/file-node:latest
-APP_UID=$(id -u)
-APP_GID=$(id -g)
 EOF
-docker compose up -d
+docker compose pull
+docker compose up -d --no-build
 ```
+
+To build the image yourself instead, run `docker compose build` before `docker compose up -d --no-build`. To update later, run `docker compose pull && docker compose up -d --no-build` again. The database lives in `./data`, which is kept across updates.
+
+The container starts as root only to hand `./data` to its `node` user (uid 1000), then runs the app unprivileged. `docker compose ps` reports the app as `healthy` once it answers HTTP requests.
 
 ### Manual Installation
 
@@ -105,8 +113,11 @@ docker compose up -d
 ```
 file-node/
 ├── .env.local               # your secrets
+├── .github/workflows/       # CI, Docker Hub publish, installer release
 ├── Dockerfile
 ├── docker-compose.yml
+├── docker-entrypoint.sh     # fixes data/ ownership, then drops root
+├── file-node.sh             # interactive installer (systemd or Docker)
 ├── data/                    # SQLite database and generated local secret
 ├── next.config.ts
 ├── package.json
@@ -224,6 +235,18 @@ validation time to remember browse/search verification for that many minutes.
   Public: list directory entries for a specific backend and path. May require Turnstile verification if enabled.
 * **`GET /api/files/view?backendId=&path=`**
   Public: proxy and stream files (supports HTTP Range requests for video/audio).
+
+## CI and Releases
+
+GitHub Actions in `.github/workflows/`:
+
+| Workflow | Runs on | What it does |
+| -------- | ------- | ------------ |
+| `ci.yml` | Pull requests and non-`main` pushes | Lint, typecheck and production build |
+| `docker.yml` | Push to `main`, manual dispatch | Lint and typecheck, then build the `linux/amd64` + `linux/arm64` image and push `tonyliuzj/file-node:latest` and `tonyliuzj/file-node:<commit sha>` to Docker Hub |
+| `release.yml` | Push to `main` that changes `file-node.sh` | Replaces `file-node.sh` on the `latest` GitHub release, which the install command downloads |
+
+`docker.yml` needs two repository secrets: `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token with read and write access).
 
 ## Security
 

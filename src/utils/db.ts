@@ -29,9 +29,15 @@ function resolveDatabasePath() {
 }
 
 const databasePath = resolveDatabasePath();
-fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
-const db = new Database(databasePath);
+// `next build` imports every route in parallel workers. Give them a throwaway in-memory database so
+// they don't race to create the real one ("database is locked") or leave one behind in the build.
+const isBuild = process.env.NEXT_PHASE === 'phase-production-build';
+if (!isBuild) {
+  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+}
+
+const db = new Database(isBuild ? ':memory:' : databasePath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
