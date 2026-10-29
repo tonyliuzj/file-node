@@ -67,7 +67,9 @@ function safeDecode(value: string) {
 }
 
 function formatBytes(value: number | null) {
-  if (!value) return 'Unknown';
+  // Not every listing format reports sizes, and an empty file is a real 0 B, not "unknown".
+  if (value === null || value === undefined) return '-';
+  if (value === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let size = value;
   let unit = 0;
@@ -81,19 +83,19 @@ function formatBytes(value: number | null) {
 function fileIcon(result: SearchResult) {
   if (Boolean(result.isDirectory)) return Folder;
   const ext = result.name.split('.').pop()?.toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext || '')) {
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'avif', 'ico', 'svg'].includes(ext || '')) {
     return FileImage;
   }
-  if (['mp4', 'webm', 'mov', 'mkv', 'ogg'].includes(ext || '')) {
+  if (['mp4', 'm4v', 'webm', 'ogv', 'mov', 'mkv'].includes(ext || '')) {
     return FileVideo;
   }
-  if (['mp3', 'wav', 'flac', 'aac'].includes(ext || '')) {
+  if (['mp3', 'wav', 'flac', 'aac', 'm4a', 'oga', 'ogg', 'opus'].includes(ext || '')) {
     return FileAudio;
   }
-  if (['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'xml', 'yaml'].includes(ext || '')) {
+  if (['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'sh', 'py', 'sql', 'go', 'rs', 'java'].includes(ext || '')) {
     return FileCode;
   }
-  if (['md', 'markdown', 'txt', 'csv', 'pdf'].includes(ext || '')) {
+  if (['md', 'markdown', 'txt', 'log', 'csv', 'ini', 'conf', 'pdf'].includes(ext || '')) {
     return FileText;
   }
   return File;
@@ -106,6 +108,7 @@ export default function SearchPageClient() {
   const [backends, setBackends] = useState<Backend[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [truncated, setTruncated] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -133,6 +136,7 @@ export default function SearchPageClient() {
     async function searchFiles() {
       if (!q.trim()) {
         setResults([]);
+        setTruncated(false);
         return;
       }
 
@@ -149,10 +153,14 @@ export default function SearchPageClient() {
         );
         if (!resultsRes.ok) throw new Error('Search failed');
         const data = (await resultsRes.json()) as SearchResult[];
-        if (mounted) setResults(data);
+        if (mounted) {
+          setResults(data);
+          setTruncated(resultsRes.headers.get('x-result-truncated') === '1');
+        }
       } catch {
         if (mounted) {
           setResults([]);
+          setTruncated(false);
           toast.error('Search failed against the file index');
         }
       } finally {
@@ -229,7 +237,11 @@ export default function SearchPageClient() {
           <div>
             <CardTitle>Results</CardTitle>
             <CardDescription>
-              {q ? `${results.length} match${results.length === 1 ? '' : 'es'} for "${q}"` : 'Enter a query to search the index.'}
+              {q
+                ? truncated
+                  ? `Showing the first ${results.length} matches for "${q}". Refine the search to narrow them down.`
+                  : `${results.length} match${results.length === 1 ? '' : 'es'} for "${q}"`
+                : 'Enter a query to search the index.'}
             </CardDescription>
           </div>
           {loading && (
@@ -304,7 +316,7 @@ export default function SearchPageClient() {
                           </span>
                           <div className="min-w-0">
                             <div className="truncate font-medium">
-                              {safeDecode(result.name || result.path.split('/').pop() || result.path)}
+                              {result.name || safeDecode(result.path.split('/').pop() || result.path)}
                             </div>
                             <div className="truncate text-xs text-muted-foreground">
                               {safeDecode(parentPath)}

@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
-import { isProtectedSecret, protectSecret } from '@/lib/credentials';
+import { isProtectedSecret, protectSecret, rekeySecret } from '@/lib/credentials';
 
 const dataDir = path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(dataDir)) {
@@ -98,6 +98,18 @@ db.prepare(
   'CREATE INDEX IF NOT EXISTS idx_backends_rescan ON backends (rescanInterval, scannedAt)'
 ).run();
 
+// Columns added after the first release.
+const backendColumns = new Set(
+  (db.prepare('PRAGMA table_info(backends)').all() as { name: string }[]).map(
+    (column) => column.name
+  )
+);
+for (const column of ['scanError', 'scanAttemptedAt']) {
+  if (!backendColumns.has(column)) {
+    db.prepare(`ALTER TABLE backends ADD COLUMN ${column} TEXT`).run();
+  }
+}
+
 const migrateUsers = db.transaction(() => {
   const users = db.prepare('SELECT id, password FROM users').all() as {
     id: number;
@@ -130,7 +142,34 @@ const migrateBackendSecrets = db.transaction(() => {
   }
 });
 
+// Secrets stored while the public example secret was configured are re-encrypted under the real one.
+const rekeyStoredSecrets = db.transaction(() => {
+  const backends = db
+    .prepare('SELECT id, password FROM backends WHERE password IS NOT NULL')
+    .all() as { id: number; password: string }[];
+  for (const backend of backends) {
+    const rekeyed = rekeySecret(backend.password);
+    if (rekeyed) {
+      db.prepare('UPDATE backends SET password = ? WHERE id = ?').run(
+        rekeyed,
+        backend.id
+      );
+    }
+  }
+
+  const turnstile = db
+    .prepare("SELECT value FROM settings WHERE key = 'turnstile.secretKey'")
+    .get() as { value: string | null } | undefined;
+  const rekeyedTurnstile = rekeySecret(turnstile?.value);
+  if (rekeyedTurnstile) {
+    db.prepare("UPDATE settings SET value = ? WHERE key = 'turnstile.secretKey'").run(
+      rekeyedTurnstile
+    );
+  }
+});
+
 migrateUsers();
 migrateBackendSecrets();
+rekeyStoredSecrets();
 
 export default db;

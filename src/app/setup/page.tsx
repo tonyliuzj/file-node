@@ -10,5 +10,7 @@ export default function SetupPage() {
     redirect('/admin/signin');
   }
 
-  return <SetupClient />;
+  return (
+    <SetupClient tokenRequired={Boolean(process.env.FILE_NODE_SETUP_TOKEN?.trim())} />
+  );
 }

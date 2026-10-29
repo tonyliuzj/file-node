@@ -20,6 +20,14 @@ type Props = {
     fileUrl: string
 }
 
+// pdfjs-dist 3.x (the newest the viewer library supports) can be made to run arbitrary script by a
+// crafted PDF through font handling that relies on eval (CVE-2024-4367). Turning eval off is
+// Mozilla's documented workaround and costs nothing for normal documents.
+const hardenDocumentParams = <T extends object>(options: T): T => ({
+    ...options,
+    isEvalSupported: false,
+})
+
 export default function PdfViewerClient({ fileUrl }: Props) {
     const defaultLayoutPluginInstance = defaultLayoutPlugin()
 
@@ -61,6 +69,7 @@ export default function PdfViewerClient({ fileUrl }: Props) {
                     <Viewer
                         fileUrl={fileUrl}
                         plugins={[defaultLayoutPluginInstance]}
+                        transformGetDocumentParams={hardenDocumentParams}
                         onZoom={handleZoom}
                         theme={{
                             theme: 'auto', 

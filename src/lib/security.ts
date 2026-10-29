@@ -9,11 +9,27 @@ export function normalizeHttpUrl(value: unknown) {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return null;
     }
+    // Credentials belong in the encrypted auth fields. In the URL they would be stored and returned
+    // in plaintext.
+    if (url.username || url.password) {
+      return null;
+    }
     url.hash = '';
     return url.toString().replace(/\/$/, '');
   } catch {
     return null;
   }
+}
+
+/**
+ * Accepts only a same-site path (`/admin/backends`), never an absolute or protocol-relative URL, so
+ * a crafted `callbackUrl` cannot send someone to another site after signing in.
+ */
+export function sanitizeCallbackPath(value: string | null | undefined, fallback: string) {
+  if (!value || !value.startsWith('/')) return fallback;
+  if (value.startsWith('//') || value.startsWith('/\\')) return fallback;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  return value;
 }
 
 export function normalizeVirtualPath(value: unknown) {
@@ -89,4 +105,24 @@ export function safeContentType(contentType: string | null) {
   }
 
   return 'application/octet-stream';
+}
+
+/**
+ * Formats are "active" when a browser will run script embedded in them. Served inline from this
+ * origin they could act as the signed-in admin, so they are sandboxed or downloaded instead.
+ */
+export function isActiveContentType(contentType: string) {
+  const mime = contentType.split(';')[0]?.trim().toLowerCase() || '';
+  return mime === 'image/svg+xml' || mime.includes('xml') || mime === 'text/html';
+}
+
+/** `Content-Disposition` that survives quotes, control characters and non-ASCII file names. */
+export function contentDisposition(type: 'inline' | 'attachment', filename: string) {
+  const clean = filename.replace(/[\u0000-\u001f\u007f]/g, '').trim() || 'file';
+  const fallback = clean.replace(/[^\x20-\x7e]/g, '_').replace(/["\\%]/g, '_');
+  const encoded = encodeURIComponent(clean).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }

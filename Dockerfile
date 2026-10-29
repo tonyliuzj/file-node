@@ -63,6 +63,11 @@ COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/.next/standalone ./
+# Account recovery tool: docker compose exec -u node file-node node scripts/reset-admin.mjs
+# Next bundles bcryptjs into the server chunks instead of shipping it, so the script gets its own
+# copy (a pure JavaScript package with no dependencies).
+COPY --from=builder --chown=node:node /app/scripts ./scripts
+COPY --from=builder --chown=node:node /app/node_modules/bcryptjs ./node_modules/bcryptjs
 
 EXPOSE 3000
 VOLUME ["/app/data"]

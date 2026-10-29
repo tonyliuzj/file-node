@@ -10,6 +10,8 @@ export type TurnstileArea = 'browse' | 'search' | 'adminLogin';
 export type TurnstileSettings = {
   siteKey: string;
   hasSecretKey: boolean;
+  /** True when FILE_NODE_DISABLE_TURNSTILE forces every check off, whatever is saved. */
+  disabledByEnv: boolean;
   requireBrowse: boolean;
   requireSearch: boolean;
   requireAdminLogin: boolean;
@@ -39,6 +41,13 @@ const CLEARANCE_CLOCK_SKEW_MS = 10 * 1000;
 const TRANSIENT_CLEARANCE_SECONDS = 60 * 60;
 const TURNSTILE_VERIFY_URL =
   'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const TURNSTILE_REQUEST_TIMEOUT_MS = 10_000;
+
+// Escape hatch for a lockout: a wrong site key makes the sign-in widget unusable, and sign-in is
+// what you would need to fix it. Set FILE_NODE_DISABLE_TURNSTILE=1, restart, fix the settings.
+function isDisabledByEnv() {
+  return process.env.FILE_NODE_DISABLE_TURNSTILE === '1';
+}
 
 function getSettingsMap() {
   const rows = db
@@ -94,6 +103,7 @@ export function getTurnstileSettings(): TurnstileSettings {
   return {
     siteKey,
     hasSecretKey,
+    disabledByEnv: isDisabledByEnv(),
     requireBrowse: boolFromSetting(settings.get(SETTING_KEYS.requireBrowse)),
     requireSearch: boolFromSetting(settings.get(SETTING_KEYS.requireSearch)),
     requireAdminLogin: boolFromSetting(settings.get(SETTING_KEYS.requireAdminLogin)),
@@ -122,9 +132,11 @@ export function updateTurnstileSettings(input: {
     setSetting(SETTING_KEYS.siteKey, siteKey || null);
   }
 
+  // Clearing and replacing in one save means "replace", so apply the clear first.
   if (input.clearSecretKey) {
     setSetting(SETTING_KEYS.secretKey, null);
-  } else if (secretKey) {
+  }
+  if (secretKey) {
     setSetting(SETTING_KEYS.secretKey, protectSecret(secretKey));
   }
 
@@ -149,6 +161,8 @@ export function updateTurnstileSettings(input: {
 }
 
 export function isTurnstileRequired(area: TurnstileArea) {
+  if (isDisabledByEnv()) return false;
+
   const settings = getTurnstileSettings();
   if (!settings.configured) return false;
 
@@ -299,6 +313,7 @@ export async function verifyTurnstileToken(
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
+      signal: AbortSignal.timeout(TURNSTILE_REQUEST_TIMEOUT_MS),
     });
 
     const result = (await response.json()) as {
@@ -317,6 +332,35 @@ export async function verifyTurnstileToken(
     return { success: true };
   } catch {
     return { success: false, error: 'Unable to verify Turnstile token' };
+  }
+}
+
+/**
+ * Asks Cloudflare whether a secret key is real. A made-up token is submitted on purpose: a valid
+ * secret answers "invalid response", a wrong one answers "invalid secret".
+ */
+export async function checkTurnstileSecret(
+  secretKey: string
+): Promise<'valid' | 'invalid' | 'unreachable'> {
+  const body = new URLSearchParams();
+  body.set('secret', secretKey);
+  body.set('response', 'file-node-key-check');
+
+  try {
+    const response = await fetch(TURNSTILE_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: AbortSignal.timeout(TURNSTILE_REQUEST_TIMEOUT_MS),
+    });
+    const result = (await response.json()) as { 'error-codes'?: string[] };
+    const codes = result['error-codes'] || [];
+    return codes.includes('invalid-input-secret') ||
+      codes.includes('missing-input-secret')
+      ? 'invalid'
+      : 'valid';
+  } catch {
+    return 'unreachable';
   }
 }
 

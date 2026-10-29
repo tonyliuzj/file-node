@@ -30,7 +30,7 @@ function loadTurnstileScript() {
   if (window.turnstile) return Promise.resolve();
   if (scriptPromise) return scriptPromise;
 
-  scriptPromise = new Promise((resolve, reject) => {
+  scriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(
       `script[src="${SCRIPT_SRC}"]`
     );
@@ -45,8 +45,16 @@ function loadTurnstileScript() {
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
-    script.onerror = () => reject();
+    script.onerror = () => {
+      // Drop the dead tag so a later attempt starts clean instead of waiting on it forever.
+      script.remove();
+      reject();
+    };
     document.head.appendChild(script);
+  }).catch((error) => {
+    // Do not cache the failure: let the next render try again.
+    scriptPromise = null;
+    throw error;
   });
 
   return scriptPromise;

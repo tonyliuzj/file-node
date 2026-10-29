@@ -107,6 +107,20 @@ require_systemd() {
   fi
 }
 
+# Refuses to delete anything that is not this app's checkout, so a mistyped INSTALL_DIR can never
+# wipe an unrelated directory (or, with sudo, the system).
+require_app_checkout_for_removal() {
+  local resolved
+  resolved="$(cd "$INSTALL_DIR" 2>/dev/null && pwd -P || true)"
+
+  if [ -z "$resolved" ] || [ "$resolved" = "/" ] || [ "$resolved" = "$USER_HOME" ] \
+    || [ ! -f "$INSTALL_DIR/package.json" ] \
+    || ! grep -q '"name": "file-node"' "$INSTALL_DIR/package.json"; then
+    echo "Refusing to remove $INSTALL_DIR: it does not look like a ${APP_TITLE} installation."
+    exit 1
+  fi
+}
+
 require_repo_checkout() {
   if [ ! -d "$INSTALL_DIR/.git" ]; then
     echo "${APP_TITLE} is not installed in $INSTALL_DIR"
@@ -122,7 +136,8 @@ read_env_value() {
     return 0
   fi
 
-  grep "^${key}=" "$file" | tail -n 1 | cut -d'=' -f2-
+  # A missing key is an empty answer, not a failure (pipefail would otherwise abort the installer).
+  grep "^${key}=" "$file" | tail -n 1 | cut -d'=' -f2- || true
 }
 
 ensure_env_value() {
@@ -303,8 +318,14 @@ ensure_repo_present() {
     cd "$INSTALL_DIR"
     pull_latest_code
   elif [ -d "$INSTALL_DIR" ]; then
-    step "Directory exists but is not a git repository. Removing and cloning fresh..."
-    rm -rf "$INSTALL_DIR"
+    # Never delete a directory the installer did not create: INSTALL_DIR may point somewhere that
+    # holds other things.
+    if [ -n "$(ls -A "$INSTALL_DIR")" ]; then
+      echo "$INSTALL_DIR already exists, is not empty, and is not a ${APP_TITLE} checkout."
+      echo "Move it aside, or choose another location with INSTALL_DIR=/path/to/dir"
+      exit 1
+    fi
+    step "Cloning repository into the empty directory..."
     git clone "$GIT_REPO" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
   else
@@ -372,21 +393,30 @@ install_nodesource_nodejs() {
   as_root apt install -y nodejs
 }
 
+# Next.js 16 refuses to start on anything older than Node 20.9.
+node_version_supported() {
+  local version="$1"
+  local major="${version%%.*}"
+  local rest="${version#*.}"
+  local minor="${rest%%.*}"
+
+  [ "$major" -gt 20 ] || { [ "$major" -eq 20 ] && [ "$minor" -ge 9 ]; }
+}
+
 ensure_nodejs() {
   step "Checking Node.js version..."
 
   if command_exists node; then
     VERSION="$(node -v | sed 's/^v//')"
-    MAJOR="${VERSION%%.*}"
 
-    if [ "$MAJOR" -lt 18 ]; then
-      echo "Node.js v$VERSION detected, but Node.js >=18 is required."
+    if ! node_version_supported "$VERSION"; then
+      echo "Node.js v$VERSION detected, but Node.js >=20.9 is required."
       read -p "Do you want to install Node.js 22? (y/n): " INSTALL_22
 
       if [[ "$INSTALL_22" =~ ^[Yy]$ ]]; then
         install_nodesource_nodejs
       else
-        echo "Installation requires Node.js >=18. Exiting."
+        echo "Installation requires Node.js >=20.9. Exiting."
         exit 1
       fi
     else
@@ -803,8 +833,19 @@ prompt_common_settings() {
 
   step "Generating application settings..."
 
-  FILE_NODE_SECRET="$(openssl rand -base64 32)"
-  echo "File Node secret generated."
+  # Installing over an existing deployment must keep its secret: a new one would make every stored
+  # backend password undecryptable and sign everyone out.
+  FILE_NODE_SECRET="$(read_env_value "FILE_NODE_SECRET_KEY" "${INSTALL_DIR}/${APP_ENV_FILE}")"
+  if [ -n "$FILE_NODE_SECRET" ]; then
+    echo "Keeping the existing File Node secret."
+  else
+    FILE_NODE_SECRET="$(openssl rand -base64 32)"
+    echo "File Node secret generated."
+  fi
+
+  # Whoever reaches /setup first becomes admin; the token makes that you.
+  SETUP_TOKEN="$(read_env_value "FILE_NODE_SETUP_TOKEN" "${INSTALL_DIR}/${APP_ENV_FILE}")"
+  SETUP_TOKEN="${SETUP_TOKEN:-$(openssl rand -hex 16)}"
 
   default_host_port="${HOST_PORT:-3000}"
   read -p "Port to expose the app on (default ${default_host_port}): " selected_host_port
@@ -828,7 +869,11 @@ DATABASE_URL=$DIRECT_DATABASE_PATH
 
 # Server port.
 PORT=$HOST_PORT
+
+# Required on the first-run /setup page, so only you can create the admin account.
+FILE_NODE_SETUP_TOKEN=$SETUP_TOKEN
 EOF
+  chmod 600 "${INSTALL_DIR}/${APP_ENV_FILE}"
 }
 
 write_docker_env_files() {
@@ -848,7 +893,11 @@ DATABASE_URL=$DOCKER_DATABASE_PATH
 
 # Server port inside the container.
 PORT=$CONTAINER_PORT
+
+# Required on the first-run /setup page, so only you can create the admin account.
+FILE_NODE_SETUP_TOKEN=$SETUP_TOKEN
 EOF
+  chmod 600 "${INSTALL_DIR}/${APP_ENV_FILE}"
 
   cat > "${INSTALL_DIR}/${COMPOSE_ENV_FILE}" <<EOF
 # Docker Compose environment file
@@ -900,6 +949,9 @@ Group=${RUN_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=NODE_ENV=production
 EnvironmentFile=${INSTALL_DIR}/${APP_ENV_FILE}
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
 ExecStart=${node_bin} ${INSTALL_DIR}/node_modules/next/dist/bin/next start -p ${app_port}
 Restart=always
 RestartSec=5
@@ -924,6 +976,8 @@ reload_and_restart_service() {
 claim_data_dir() {
   if [ -d "${INSTALL_DIR}/data" ]; then
     as_root chown -R "${RUN_USER}:${RUN_GROUP}" "${INSTALL_DIR}/data"
+    # Password hashes and encrypted credentials live here: nobody else needs to read them.
+    as_root chmod -R go-rwx "${INSTALL_DIR}/data"
   fi
 }
 
@@ -953,6 +1007,7 @@ install_direct() {
   echo
   echo ".env file created: ${INSTALL_DIR}/${APP_ENV_FILE}"
   echo "Complete setup at: http://localhost:$HOST_PORT/setup"
+  echo "Setup token (the page asks for it): $SETUP_TOKEN"
 
   install_project_dependencies
 
@@ -1048,8 +1103,10 @@ uninstall_direct() {
   stop_and_remove_service
 
   if [ -d "$INSTALL_DIR" ]; then
+    require_app_checkout_for_removal
     step "Removing installation directory..."
-    rm -rf "$INSTALL_DIR"
+    # data/ may belong to the container user, which the invoking user cannot delete from.
+    as_root rm -rf "$INSTALL_DIR"
     echo "Removed $INSTALL_DIR"
   fi
 
@@ -1075,6 +1132,7 @@ install_docker_mode() {
   echo "- ${INSTALL_DIR}/${APP_ENV_FILE}"
   echo "- ${INSTALL_DIR}/${COMPOSE_ENV_FILE}"
   echo "Complete setup at: http://localhost:$HOST_PORT/setup"
+  echo "Setup token (the page asks for it): $SETUP_TOKEN"
 
   step "Creating data directory..."
   mkdir -p "${INSTALL_DIR}/data"
@@ -1163,6 +1221,8 @@ uninstall_docker_mode() {
   echo "Uninstalling ${APP_TITLE} Docker deployment..."
 
   if [ -d "$INSTALL_DIR" ]; then
+    require_app_checkout_for_removal
+
     if command_exists docker && docker compose version >/dev/null 2>&1 && [ -f "${INSTALL_DIR}/${COMPOSE_FILE}" ]; then
       step "Stopping and removing Docker containers..."
       compose down --remove-orphans || true

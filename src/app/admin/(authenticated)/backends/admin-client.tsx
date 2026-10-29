@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { signOut } from 'next-auth/react';
 import {
   Edit2,
@@ -54,6 +54,8 @@ type Backend = {
   hasPassword?: number | boolean;
   rescanInterval?: number | null;
   scannedAt?: string | null;
+  scanError?: string | null;
+  scanning?: boolean;
   fileCount?: number;
 };
 
@@ -98,13 +100,27 @@ export default function AdminClient() {
   const [form, setForm] = useState<BackendForm>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [scanningId, setScanningId] = useState<number | null>(null);
+  // Backends whose scan this page has seen running, so the outcome can be announced when it ends.
+  const watchedScans = useRef(new Set<number>());
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
   async function refreshBackends() {
     const res = await fetch('/api/backends', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to load backends');
-    setBackends((await res.json()) as Backend[]);
+    const data = (await res.json()) as Backend[];
+
+    for (const backend of data) {
+      if (backend.scanning) {
+        watchedScans.current.add(backend.id);
+      } else if (watchedScans.current.delete(backend.id)) {
+        if (backend.scanError) {
+          toast.error(`Scan of ${backend.name} failed: ${backend.scanError}`);
+        } else {
+          toast.success(`Scan of ${backend.name} completed`);
+        }
+      }
+    }
+    setBackends(data);
   }
 
   useEffect(() => {
@@ -127,6 +143,16 @@ export default function AdminClient() {
       mounted = false;
     };
   }, []);
+
+  // Scans run on the server in the background; keep the list fresh until they all finish.
+  const anyScanning = backends.some((backend) => backend.scanning);
+  useEffect(() => {
+    if (!anyScanning) return undefined;
+    const timer = setInterval(() => {
+      refreshBackends().catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [anyScanning]);
 
   const activeBackend = useMemo(
     () => backends.find((backend) => backend.id === form.id),
@@ -187,7 +213,6 @@ export default function AdminClient() {
   }
 
   async function rescan(id: number) {
-    setScanningId(id);
     try {
       const res = await fetch('/api/backends/scan', {
         method: 'POST',
@@ -196,12 +221,11 @@ export default function AdminClient() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Scan failed');
+      watchedScans.current.add(id);
+      toast.info(data.started ? 'Scan started' : 'A scan is already running');
       await refreshBackends();
-      toast.success('Scan completed');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to scan backend');
-    } finally {
-      setScanningId(null);
+      toast.error(err instanceof Error ? err.message : 'Failed to start scan');
     }
   }
 
@@ -351,6 +375,14 @@ export default function AdminClient() {
                       <TableCell className="hidden md:table-cell">
                         <div className="space-y-1 text-sm">
                           <div>{formatDate(backend.scannedAt)}</div>
+                          {backend.scanError && !backend.scanning && (
+                            <div
+                              className="max-w-56 truncate text-xs text-destructive"
+                              title={backend.scanError}
+                            >
+                              Last scan failed: {backend.scanError}
+                            </div>
+                          )}
                           <div className="text-xs text-muted-foreground">
                             {backend.rescanInterval
                               ? `Every ${backend.rescanInterval}m`
@@ -372,10 +404,10 @@ export default function AdminClient() {
                             variant="ghost"
                             size="icon"
                             onClick={() => rescan(backend.id)}
-                            disabled={scanningId === backend.id}
+                            disabled={Boolean(backend.scanning)}
                             title="Rescan backend"
                           >
-                            {scanningId === backend.id ? (
+                            {backend.scanning ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <RefreshCw className="h-4 w-4" />

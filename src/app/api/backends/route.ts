@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth';
 import { protectSecret } from '@/lib/credentials';
 import { requireAdmin } from '@/lib/admin';
 import { normalizeHttpUrl } from '@/lib/security';
+import { isScanning } from '@/utils/scanner';
 
 type BackendBody = {
   id?: unknown;
@@ -16,6 +17,9 @@ type BackendBody = {
   password?: unknown;
   rescanInterval?: unknown;
 };
+
+const INVALID_URL_MESSAGE =
+  'Backend URL must be a valid http or https URL, without a username or password in it';
 
 type StoredBackend = {
   id: number;
@@ -44,7 +48,7 @@ function normalizeRescanInterval(value: unknown) {
 }
 
 function getAdminDetails() {
-  return db
+  const rows = db
     .prepare(`
       SELECT
         b.id,
@@ -55,13 +59,17 @@ function getAdminDetails() {
         b.password IS NOT NULL AS hasPassword,
         b.rescanInterval,
         b.scannedAt,
+        b.scanAttemptedAt,
+        b.scanError,
         COUNT(f.id) AS fileCount
       FROM backends b
       LEFT JOIN files f ON f.backendId = b.id
       GROUP BY b.id
       ORDER BY b.id
     `)
-    .all();
+    .all() as { id: number }[];
+
+  return rows.map((row) => ({ ...row, scanning: isScanning(row.id) }));
 }
 
 export async function GET() {
@@ -103,10 +111,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as BackendBody;
     const url = normalizeHttpUrl(body.url);
     if (!url) {
-      return NextResponse.json(
-        { error: 'Backend URL must be a valid http or https URL' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: INVALID_URL_MESSAGE }, { status: 400 });
     }
 
     const rescanInterval = normalizeRescanInterval(body.rescanInterval);
@@ -178,10 +183,7 @@ export async function PUT(req: NextRequest) {
 
     const url = normalizeHttpUrl(body.url);
     if (!url) {
-      return NextResponse.json(
-        { error: 'Backend URL must be a valid http or https URL' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: INVALID_URL_MESSAGE }, { status: 400 });
     }
 
     const rescanInterval = normalizeRescanInterval(body.rescanInterval);

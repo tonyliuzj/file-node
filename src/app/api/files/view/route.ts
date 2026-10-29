@@ -3,13 +3,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { revealSecret } from '@/lib/credentials';
 import {
+  contentDisposition,
+  isActiveContentType,
   isUrlInsideBackend,
   normalizeHttpUrl,
   normalizeVirtualPath,
   safeContentType,
+  safeDecodeURIComponent,
 } from '@/lib/security';
 
 export const runtime = 'nodejs';
+
+// Time allowed for the backend to start answering. The body is not capped: videos stream for as
+// long as the viewer keeps watching.
+const UPSTREAM_HEADERS_TIMEOUT_MS = 30_000;
+
+// Script inside an SVG or XML document must never run with this site's cookies.
+const ACTIVE_CONTENT_CSP =
+  "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
 interface BackendRecord {
   id: number;
@@ -34,7 +45,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Missing backendId', { status: 400 });
   }
   const backendId = Number(backendIdParam);
-  if (Number.isNaN(backendId)) {
+  if (!Number.isInteger(backendId)) {
     return new NextResponse('Invalid backendId', { status: 400 });
   }
 
@@ -77,7 +88,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const forwardHeaders: Record<string, string> = {};
+  // Ranges refer to the bytes as stored, so ask for them unencoded. Otherwise a compressing
+  // backend sends a body whose length no longer matches the headers we would forward.
+  const forwardHeaders: Record<string, string> = { 'accept-encoding': 'identity' };
   const range = request.headers.get('range');
   if (range) forwardHeaders['range'] = range;
 
@@ -95,11 +108,30 @@ export async function GET(request: NextRequest) {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-  const upstream = await fetch(file.url, {
-    headers: forwardHeaders,
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timeout));
+  request.signal.addEventListener('abort', () => controller.abort(), {
+    once: true,
+  });
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_HEADERS_TIMEOUT_MS);
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(file.url, {
+      headers: forwardHeaders,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (request.signal.aborted) {
+      return new NextResponse(null, { status: 499 });
+    }
+    const timedOut = error instanceof Error && error.name === 'AbortError';
+    return new NextResponse(
+      timedOut ? 'Backend timed out' : 'Backend unreachable',
+      { status: timedOut ? 504 : 502 }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
   if (!upstream.ok && upstream.status !== 206) {
     return new NextResponse(`Upstream error: ${upstream.status}`, {
       status: upstream.status,
@@ -116,27 +148,39 @@ export async function GET(request: NextRequest) {
     'etag',
   ] as const) {
     const value = upstream.headers.get(header);
-    if (value) {
-      responseHeaders.set(
-        header,
-        header === 'content-type' ? safeContentType(value) : value
-      );
+    if (!value) continue;
+
+    // A body that was decoded on the way in no longer matches the length the backend announced.
+    if (header === 'content-length' && upstream.headers.has('content-encoding')) {
+      continue;
     }
+    responseHeaders.set(
+      header,
+      header === 'content-type' ? safeContentType(value) : value
+    );
   }
   if (!responseHeaders.has('content-type')) {
     responseHeaders.set('content-type', 'application/octet-stream');
   }
+  const contentType = responseHeaders.get('content-type') || '';
+  const isActive = isActiveContentType(contentType);
+
   responseHeaders.set('x-content-type-options', 'nosniff');
   responseHeaders.set('referrer-policy', 'no-referrer');
+  // Other sites may not embed or hotlink files through this proxy.
+  responseHeaders.set('cross-origin-resource-policy', 'same-origin');
+  if (isActive) {
+    responseHeaders.set('content-security-policy', ACTIVE_CONTENT_CSP);
+  }
 
-  const filename = encodeURIComponent(
-    filePath.split('/').pop()?.replace(/["\r\n]/g, '') || 'file'
-  );
-  const disposition =
-    url.searchParams.get('download') === '1' ? 'attachment' : 'inline';
+  const filename = safeDecodeURIComponent(filePath.split('/').pop() || 'file');
+  // SVG still renders inline (sandboxed) so images work; other markup is only ever downloaded.
+  const forceDownload =
+    url.searchParams.get('download') === '1' ||
+    (isActive && contentType.split(';')[0]?.trim().toLowerCase() !== 'image/svg+xml');
   responseHeaders.set(
     'content-disposition',
-    `${disposition}; filename="${filename}"`
+    contentDisposition(forceDownload ? 'attachment' : 'inline', filename)
   );
 
   return new NextResponse(upstream.body, {

@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import TurnstileWidget from '@/components/turnstile-widget';
+import { sanitizeCallbackPath } from '@/lib/security';
 
 type SignInClientProps = {
   turnstileSiteKey: string;
@@ -27,7 +28,10 @@ type SignInClientProps = {
 function SignInForm({ turnstileSiteKey, requireTurnstile }: SignInClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') || '/admin/backends';
+  const callbackUrl = sanitizeCallbackPath(
+    searchParams.get('callbackUrl'),
+    '/admin/backends'
+  );
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -52,7 +56,9 @@ function SignInForm({ turnstileSiteKey, requireTurnstile }: SignInClientProps) {
         redirect: false,
       });
 
-      if (result?.error) {
+      if (result?.error === 'TooManyAttempts') {
+        toast.error('Too many failed attempts. Please wait a few minutes and try again.');
+      } else if (result?.error) {
         toast.error('Invalid username or password');
       } else if (result?.ok) {
         router.push(callbackUrl);

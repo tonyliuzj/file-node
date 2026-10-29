@@ -28,6 +28,7 @@ import { Switch } from '@/components/ui/switch';
 type TurnstileSettings = {
   siteKey: string;
   hasSecretKey: boolean;
+  disabledByEnv: boolean;
   requireBrowse: boolean;
   requireSearch: boolean;
   requireAdminLogin: boolean;
@@ -38,6 +39,7 @@ type TurnstileSettings = {
 const emptyTurnstileSettings: TurnstileSettings = {
   siteKey: '',
   hasSecretKey: false,
+  disabledByEnv: false,
   requireBrowse: false,
   requireSearch: false,
   requireAdminLogin: false,
@@ -100,6 +102,10 @@ export default function SettingsPage() {
     }
     if (!newUsername.trim() && !newPassword) {
       toast.error('Provide a new username or password');
+      return;
+    }
+    if (newPassword && newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters');
       return;
     }
     if (newPassword && newPassword !== confirmPassword) {
@@ -251,8 +257,12 @@ export default function SettingsPage() {
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                   placeholder="Leave blank to keep current password"
+                  minLength={8}
                   disabled={loading}
                 />
+                <p className="text-xs text-muted-foreground">
+                  At least 8 characters. Other signed-in sessions end when the password changes.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm password</Label>
@@ -289,6 +299,12 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
+            {turnstile.disabledByEnv && (
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                Turnstile checks are switched off by FILE_NODE_DISABLE_TURNSTILE on the server. Fix the
+                settings below, then remove that variable and restart to enforce them again.
+              </p>
+            )}
             <div className="space-y-2">
               <Label htmlFor="turnstileSiteKey">Site key</Label>
               <Input

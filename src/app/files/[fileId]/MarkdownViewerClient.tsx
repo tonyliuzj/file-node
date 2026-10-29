@@ -1,15 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/atom-one-dark.css';
 import { Loader2, Download } from 'lucide-react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { formatPreviewLimit, useTextFile } from './use-text-file';
 
 interface MarkdownViewerProps {
   fileUrl: string;
@@ -18,32 +17,9 @@ interface MarkdownViewerProps {
 }
 
 export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }: MarkdownViewerProps) {
-  const [content, setContent] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [loadFailed, setLoadFailed] = useState<boolean>(false);
+  const file = useTextFile(fileUrl);
 
-  useEffect(() => {
-    const fetchContent = async () => {
-      try {
-        const response = await fetch(fileUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch file: ${response.statusText}`);
-        }
-        const text = await response.text();
-        setContent(text);
-        setLoadFailed(false);
-        setLoading(false);
-      } catch {
-        toast.error('Failed to load file content');
-        setLoadFailed(true);
-        setLoading(false);
-      }
-    };
-
-    fetchContent();
-  }, [fileUrl]);
-
-  if (loading) {
+  if (file.status === 'loading') {
     return (
       <div className="flex items-center justify-center h-full bg-background">
         <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -51,16 +27,19 @@ export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }:
     );
   }
 
-  if (loadFailed) {
+  if (file.status === 'error') {
     return (
       <div className="flex h-full items-center justify-center bg-muted/40 p-4">
         <Card className="w-full max-w-md shadow-sm">
           <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              This file could not be previewed: {file.message}.
+            </p>
             <Button asChild>
-            <a href={downloadUrl} download={fileName}>
+              <a href={downloadUrl} download={fileName}>
                 <Download className="mr-2 h-4 w-4" />
                 Download
-            </a>
+              </a>
             </Button>
           </CardContent>
         </Card>
@@ -70,6 +49,11 @@ export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }:
 
   return (
     <div className="flex flex-col h-full bg-background">
+      {file.truncated && (
+        <div className="border-b bg-muted px-4 py-2 text-sm text-muted-foreground">
+          Showing the first {formatPreviewLimit()} of this file. Download it to see everything.
+        </div>
+      )}
       <ScrollArea className="flex-1">
         <div className="max-w-4xl mx-auto p-8 prose dark:prose-invert prose-blue prose-img:rounded-xl">
             <ReactMarkdown
@@ -79,10 +63,15 @@ export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }:
                 a: ({ ...props }) => (
                 <a {...props} className="text-primary hover:underline font-medium" target="_blank" rel="noopener noreferrer" />
                 ),
+                // react-markdown 9+ no longer passes `inline`: inline code is the one without a
+                // language class and without line breaks.
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 code: (props: any) => {
-                const { inline, className, children, ...rest } = props;
-                if (inline) {
+                // `node` is react-markdown's AST handle; it must not reach the DOM element.
+                const { className, children, node, ...rest } = props;
+                void node;
+                const isInline = !className && !String(children).includes('\n');
+                if (isInline) {
                     return <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-primary" {...rest}>{children}</code>;
                 }
                 return <code className={className} {...rest}>{children}</code>;
@@ -103,7 +92,7 @@ export default function MarkdownViewerClient({ fileUrl, downloadUrl, fileName }:
                 )
             }}
             >
-            {content}
+            {file.text}
             </ReactMarkdown>
         </div>
       </ScrollArea>

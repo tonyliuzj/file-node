@@ -17,8 +17,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-export default function SetupClient() {
+export default function SetupClient({ tokenRequired }: { tokenRequired: boolean }) {
   const router = useRouter();
+  const [setupToken, setSetupToken] = useState('');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,8 +28,8 @@ export default function SetupClient() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
-    if (!password) {
-      toast.error('Password is required');
+    if (password.length < 8) {
+      toast.error('Password must be at least 8 characters');
       return;
     }
 
@@ -42,7 +43,7 @@ export default function SetupClient() {
       const response = await fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, confirmPassword }),
+        body: JSON.stringify({ username, password, confirmPassword, setupToken }),
       });
       const data = await response.json();
 
@@ -85,6 +86,24 @@ export default function SetupClient() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {tokenRequired && (
+              <div className="space-y-2">
+                <Label htmlFor="setupToken">Setup token</Label>
+                <Input
+                  id="setupToken"
+                  type="password"
+                  value={setupToken}
+                  onChange={(event) => setSetupToken(event.target.value)}
+                  autoComplete="off"
+                  disabled={loading}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  The installer printed this token, and it is stored as
+                  FILE_NODE_SETUP_TOKEN in your environment file.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>
               <Input
@@ -109,8 +128,12 @@ export default function SetupClient() {
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="new-password"
                 disabled={loading}
+                minLength={8}
                 required
               />
+              <p className="text-xs text-muted-foreground">
+                At least 8 characters.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm password</Label>

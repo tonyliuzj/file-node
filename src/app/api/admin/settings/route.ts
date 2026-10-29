@@ -5,7 +5,17 @@ import db from '@/utils/db';
 import { authOptions } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 import { requireAdmin } from '@/lib/admin';
-import { getTurnstileSettings, updateTurnstileSettings } from '@/lib/turnstile';
+import {
+  checkTurnstileSecret,
+  getTurnstileSecretKey,
+  getTurnstileSettings,
+  updateTurnstileSettings,
+} from '@/lib/turnstile';
+import { USERNAME_PATTERN, USERNAME_RULE, validateNewPassword } from '@/lib/password';
+import { clearFailures, recordFailure, retryAfterSeconds } from '@/lib/rate-limit';
+
+const PASSWORD_CHANGE_WINDOW_MS = 15 * 60 * 1000;
+const PASSWORD_CHANGE_LIMIT = 5;
 
 export async function GET() {
   try {
@@ -86,6 +96,34 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    // A wrong secret key would make every protected form unusable, including admin sign-in, so
+    // have Cloudflare confirm it before protection is switched on.
+    const protectionEnabled = requireBrowse || requireSearch || requireAdminLogin;
+    const wasProtected =
+      currentSettings.requireBrowse ||
+      currentSettings.requireSearch ||
+      currentSettings.requireAdminLogin;
+    const effectiveSecret =
+      secretKey || (clearSecretKey ? '' : getTurnstileSecretKey() || '');
+    if (protectionEnabled && effectiveSecret && (secretKey || !wasProtected)) {
+      const check = await checkTurnstileSecret(effectiveSecret);
+      if (check === 'invalid') {
+        return NextResponse.json(
+          { error: 'Cloudflare rejected this Turnstile secret key. Check it and try again.' },
+          { status: 400 }
+        );
+      }
+      if (check === 'unreachable') {
+        return NextResponse.json(
+          {
+            error:
+              'Could not reach Cloudflare to verify the secret key. Protection was not enabled.',
+          },
+          { status: 502 }
+        );
+      }
+    }
+
     updateTurnstileSettings({
       siteKey: siteKeyProvided ? siteKey : undefined,
       secretKey,
@@ -128,7 +166,7 @@ export async function PUT(req: NextRequest) {
     const nextPassword =
       typeof newPassword === 'string' ? newPassword : '';
 
-    if (!currentPassword) {
+    if (typeof currentPassword !== 'string' || !currentPassword) {
       return NextResponse.json(
         { error: 'Current password is required' },
         { status: 400 }
@@ -141,11 +179,14 @@ export async function PUT(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (nextUsername && !/^[a-zA-Z0-9._@-]{3,64}$/.test(nextUsername)) {
-      return NextResponse.json(
-        { error: 'Username must be 3-64 characters using letters, numbers, dots, dashes, underscores, or @' },
-        { status: 400 }
-      );
+    if (nextUsername && !USERNAME_PATTERN.test(nextUsername)) {
+      return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
+    }
+    if (nextPassword) {
+      const passwordProblem = validateNewPassword(nextPassword);
+      if (passwordProblem) {
+        return NextResponse.json({ error: passwordProblem }, { status: 400 });
+      }
     }
 
     const session = await getServerSession(authOptions);
@@ -169,14 +210,26 @@ export async function PUT(req: NextRequest) {
       );
     }
 
+    // Changing credentials re-asks for the password, so a stolen session cookie must not be able
+    // to use this form to guess it.
+    const limitKey = `password-change:${user.id}`;
+    if (retryAfterSeconds(limitKey, PASSWORD_CHANGE_LIMIT) > 0) {
+      return NextResponse.json(
+        { error: 'Too many incorrect attempts. Try again later.' },
+        { status: 429 }
+      );
+    }
+
     const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
 
     if (!isPasswordValid) {
+      recordFailure(limitKey, PASSWORD_CHANGE_WINDOW_MS);
       return NextResponse.json(
         { error: 'Current password is incorrect' },
         { status: 401 }
       );
     }
+    clearFailures(limitKey);
 
     if (nextUsername) {
       const duplicate = db

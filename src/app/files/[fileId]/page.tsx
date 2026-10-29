@@ -27,7 +27,7 @@ function ViewerContent() {
   
   if (ext === 'pdf') {
     viewerElement = <PdfViewerClient fileUrl={src} />;
-  } else if (ext && ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(ext)) {
+  } else if (ext && ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'avif', 'ico', 'svg'].includes(ext)) {
     viewerElement = (
       <div className="flex h-full items-center justify-center bg-muted/40 p-4">
         <Image
@@ -40,7 +40,7 @@ function ViewerContent() {
         />
       </div>
     );
-  } else if (ext && ['mp4', 'webm', 'ogg'].includes(ext)) {
+  } else if (ext && ['mp4', 'm4v', 'webm', 'ogv', 'mov'].includes(ext)) {
     viewerElement = (
       <VideoViewerClient
         fileUrl={src}
@@ -48,7 +48,7 @@ function ViewerContent() {
         fileName={fileName}
       />
     );
-  } else if (ext && ['txt', 'js', 'ts', 'html', 'css', 'json', 'xml', 'yaml', 'csv'].includes(ext)) {
+  } else if (ext && ['txt', 'log', 'js', 'ts', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'csv', 'ini', 'conf', 'sh', 'py', 'sql', 'go', 'rs', 'java'].includes(ext)) {
     viewerElement = (
       <TextViewerClient
         fileUrl={src}
@@ -56,7 +56,7 @@ function ViewerContent() {
         fileName={fileName}
       />
     );
-  } else if (ext && ['mp3', 'wav'].includes(ext)) {
+  } else if (ext && ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga', 'ogg', 'opus'].includes(ext)) {
     viewerElement = (
       <AudioViewerClient
         fileUrl={src}

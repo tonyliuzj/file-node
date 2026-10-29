@@ -22,16 +22,17 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
 
+  // The play/pause state follows the element's own events, so a rejected play() (autoplay policy,
+  // unsupported format) leaves the button on "play" instead of stuck on "pause".
   const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play().catch(err => {
-          toast.error('Failed to play video: ' + err.message);
-        });
-      }
-      setIsPlaying(!isPlaying);
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(err => {
+        toast.error('Failed to play video: ' + err.message);
+      });
+    } else {
+      video.pause();
     }
   };
 
@@ -123,6 +124,8 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
           src={fileUrl}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
           onEnded={() => setIsPlaying(false)}
           onError={() => {
             toast.error('Failed to load video file');
@@ -146,7 +149,8 @@ export default function VideoViewerClient({ fileUrl, downloadUrl, fileName }: Vi
       </div>
       
       {/* Controls Bar */}
-      <div className="bg-gradient-to-t from-black/80 to-transparent p-4 absolute bottom-0 left-0 right-0 transition-opacity opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+      {/* Hover never happens on touch screens, so the controls also stay up while paused. */}
+      <div className={`bg-gradient-to-t from-black/80 to-transparent p-4 absolute bottom-0 left-0 right-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 ${isPlaying ? 'opacity-0' : 'opacity-100'}`}>
           <div className="flex flex-col gap-2 max-w-5xl mx-auto">
              <div className="flex items-center gap-4">
                 <Slider

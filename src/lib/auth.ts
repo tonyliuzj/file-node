@@ -1,10 +1,43 @@
 // src/lib/auth.ts
+import crypto from 'crypto';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import type { NextAuthOptions } from 'next-auth';
 import db from '@/utils/db';
 import bcrypt from 'bcryptjs';
 import { getPersistentSecret } from '@/lib/credentials';
 import { isTurnstileRequired, verifyTurnstileToken } from '@/lib/turnstile';
+import {
+  clearFailures,
+  clientIpFromHeaders,
+  recordFailure,
+  retryAfterSeconds,
+} from '@/lib/rate-limit';
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+// Failed attempts allowed per (client address, username) and per username overall. The second
+// cap still holds when the client address header is spoofed.
+const LOGIN_LIMIT_PER_CLIENT = 8;
+const LOGIN_LIMIT_PER_ACCOUNT = 40;
+const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+
+// Compared against when the username does not exist, so an unknown account takes as long to reject
+// as a wrong password and cannot be told apart by timing.
+const TIMING_EQUALIZER_HASH =
+  '$2b$12$QAGxdkg9hhpBY8V2ygabbeGCvkJt/NM2BBb9MEpX/92J7YO3N8q/q';
+
+type UserRow = { id: number; username: string; password: string };
+
+/**
+ * Identifies the current password without exposing the hash. Stored in the session token so that
+ * changing the password invalidates every session that was issued before it.
+ */
+export function passwordFingerprint(passwordHash: string) {
+  return crypto
+    .createHash('sha256')
+    .update(passwordHash)
+    .digest('hex')
+    .slice(0, 16);
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -15,57 +48,100 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
         turnstileToken: { label: 'Turnstile token', type: 'text' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.username || !credentials?.password) {
           return null;
         }
+
+        const username = String(credentials.username).slice(0, 64);
+        const clientKey = `login:${clientIpFromHeaders(req?.headers)}:${username.toLowerCase()}`;
+        const accountKey = `login-account:${username.toLowerCase()}`;
+
+        if (
+          retryAfterSeconds(clientKey, LOGIN_LIMIT_PER_CLIENT) > 0 ||
+          retryAfterSeconds(accountKey, LOGIN_LIMIT_PER_ACCOUNT) > 0
+        ) {
+          throw new Error('TooManyAttempts');
+        }
+
+        const fail = () => {
+          recordFailure(clientKey, LOGIN_WINDOW_MS);
+          recordFailure(accountKey, LOGIN_WINDOW_MS);
+          return null;
+        };
 
         if (isTurnstileRequired('adminLogin')) {
           const result = await verifyTurnstileToken(
             String(credentials.turnstileToken || '')
           );
           if (!result.success) {
-            return null;
+            return fail();
           }
         }
 
-        const user = db.prepare('SELECT id, username, password FROM users WHERE username = ?')
-          .get(credentials.username) as { id: number; username: string; password: string } | undefined;
+        const user = db
+          .prepare('SELECT id, username, password FROM users WHERE username = ?')
+          .get(username) as UserRow | undefined;
 
-        if (!user) {
-          return null;
+        const hash =
+          user && user.password.startsWith('$2')
+            ? user.password
+            : TIMING_EQUALIZER_HASH;
+        const isPasswordValid = await bcrypt.compare(
+          String(credentials.password),
+          hash
+        );
+
+        if (!user || hash === TIMING_EQUALIZER_HASH || !isPasswordValid) {
+          return fail();
         }
 
-        if (!user.password.startsWith('$2')) {
-          return null;
-        }
-
-        const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-
-        if (isPasswordValid) {
-          return {
-            id: user.id.toString(),
-            name: user.username,
-            email: null,
-            image: null,
-            role: 'admin',
-          };
-        }
-        return null;
+        clearFailures(clientKey);
+        return {
+          id: user.id.toString(),
+          name: user.username,
+          email: null,
+          image: null,
+          role: 'admin',
+          pwv: passwordFingerprint(user.password),
+        };
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user }) {
-      if (user) token.role = (user as { role?: string }).role;
+      if (user) {
+        const signedIn = user as { id: string; role?: string; pwv?: string };
+        token.role = signedIn.role;
+        token.uid = signedIn.id;
+        token.pwv = signedIn.pwv;
+      }
       return token;
     },
     async session({ session, token }) {
       session.user = session.user || {};
-      session.user.role = token.role as string;
+
+      // A token only counts while its account still exists and the password has not changed since
+      // it was issued. Anything else is demoted to an anonymous session, which every admin check
+      // already rejects.
+      const account =
+        typeof token.uid === 'string'
+          ? (db
+              .prepare('SELECT id, username, password FROM users WHERE id = ?')
+              .get(Number(token.uid)) as UserRow | undefined)
+          : undefined;
+      const current =
+        account &&
+        token.pwv &&
+        token.pwv === passwordFingerprint(account.password)
+          ? account
+          : null;
+
+      session.user.role = current ? (token.role as string) : undefined;
+      session.user.name = current ? current.username : null;
       return session;
     },
   },
-  session: { strategy: 'jwt' },
+  session: { strategy: 'jwt', maxAge: SESSION_MAX_AGE_SECONDS },
   secret: getPersistentSecret(),
 };

@@ -19,16 +19,17 @@ export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: Au
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  // The play/pause state follows the element's own events, so a rejected play() (autoplay policy,
+  // unsupported format) leaves the button on "play" instead of stuck on "pause".
   const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play().catch(err => {
-          toast.error('Failed to play audio: ' + err.message);
-        });
-      }
-      setIsPlaying(!isPlaying);
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(err => {
+        toast.error('Failed to play audio: ' + err.message);
+      });
+    } else {
+      audio.pause();
     }
   };
 
@@ -77,6 +78,8 @@ export default function AudioViewerClient({ fileUrl, downloadUrl, fileName }: Au
             src={fileUrl}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
             onEnded={() => setIsPlaying(false)}
             onError={() => toast.error('Failed to load audio file')}
             />

@@ -97,7 +97,9 @@ function normalizePath(value: string) {
 }
 
 function formatBytes(value: number | null) {
-  if (!value) return 'Unknown';
+  // Not every listing format reports sizes, and an empty file is a real 0 B, not "unknown".
+  if (value === null || value === undefined) return '-';
+  if (value === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let size = value;
   let unit = 0;
@@ -110,31 +112,34 @@ function formatBytes(value: number | null) {
 
 function formatDate(value: string | null | undefined) {
   if (!value) return 'Not scanned';
+  const date = new Date(value);
+  // Intl throws on an invalid date, which would blank the whole page.
+  if (Number.isNaN(date.getTime())) return '-';
   return new Intl.DateTimeFormat('en', {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function fileIcon(entry: Entry) {
   if (entry.isDirectory) return Folder;
   const ext = entry.name.split('.').pop()?.toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext || '')) {
+  if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'avif', 'ico', 'svg'].includes(ext || '')) {
     return FileImage;
   }
-  if (['mp4', 'webm', 'mov', 'mkv', 'ogg'].includes(ext || '')) {
+  if (['mp4', 'm4v', 'webm', 'ogv', 'mov', 'mkv'].includes(ext || '')) {
     return FileVideo;
   }
-  if (['mp3', 'wav', 'flac', 'aac'].includes(ext || '')) {
+  if (['mp3', 'wav', 'flac', 'aac', 'm4a', 'oga', 'ogg', 'opus'].includes(ext || '')) {
     return FileAudio;
   }
   if (['zip', 'tar', 'gz', '7z', 'rar'].includes(ext || '')) {
     return FileArchive;
   }
-  if (['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'xml', 'yaml'].includes(ext || '')) {
+  if (['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'sh', 'py', 'sql', 'go', 'rs', 'java'].includes(ext || '')) {
     return FileCode;
   }
-  if (['md', 'markdown', 'txt', 'csv', 'pdf'].includes(ext || '')) {
+  if (['md', 'markdown', 'txt', 'log', 'csv', 'ini', 'conf', 'pdf'].includes(ext || '')) {
     return FileText;
   }
   return File;
@@ -496,7 +501,7 @@ export default function ExplorerClient() {
                                   </span>
                                   <div className="min-w-0">
                                     <div className="truncate font-medium">
-                                      {safeDecode(entry.name)}
+                                      {entry.name}
                                     </div>
                                     <div className="truncate text-xs text-muted-foreground md:hidden">
                                       {ext}

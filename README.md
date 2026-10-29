@@ -7,7 +7,8 @@ File Node is a Next.js-powered self-hosted file explorer that indexes and browse
 - **Fast search** by filename across the local SQLite index
 - **Explorer UI**: navigate folder hierarchies with breadcrumb navigation
 - **Inline viewer** for PDFs, images, video, audio, markdown, and text files (uses HTTP Range requests)
-- **Auto-rescan**: background cron job scans backends at configured intervals
+- **Auto-rescan**: background cron job scans backends at configured intervals; scans run in the background, so large backends never time out the admin page
+- **File sizes and modified times** read from Apache, nginx and Lighttpd style listings
 - **Admin panel**: add/edit/delete backends, name them, configure auth and scan intervals
 - **First-run setup**: create the initial local admin account from the browser
 - **Admin settings**: update credentials and configure Cloudflare Turnstile protection
@@ -20,7 +21,7 @@ File Node is a Next.js-powered self-hosted file explorer that indexes and browse
 ## Prerequisites
 
 - **Docker** with Compose v2 for the Docker install path
-- **Node.js** ≥18 and **npm** for direct/manual installs
+- **Node.js** ≥20.9 and **npm** for direct/manual installs
 - **VPS** or server with public HTTPS (for production)
 - Shared HTTP/WebDAV storage backends with directory listing enabled
 
@@ -63,6 +64,8 @@ docker compose pull
 docker compose up -d --no-build
 ```
 
+`example.env.local` is safe to copy as is. To require a token on the first-run setup page, uncomment `FILE_NODE_SETUP_TOKEN` in `.env.local` and set it to something random (`openssl rand -hex 16`).
+
 To build the image yourself instead, run `docker compose build` before `docker compose up -d --no-build`. To update later, run `docker compose pull && docker compose up -d --no-build` again. The database lives in `./data`, which is kept across updates.
 
 The container starts as root only to hand `./data` to its `node` user (uid 1000), then runs the app unprivileged. `docker compose ps` reports the app as `healthy` once it answers HTTP requests.
@@ -85,11 +88,14 @@ The container starts as root only to hand `./data` to its `node` user (uid 1000)
 3. **Environment variables**
 
    Copy `example.env.local` to `.env.local` if you want to override the port
-   or pin a credential-encryption secret and SQLite path. Turnstile keys are
-   configured later from the admin settings screen.
+   or the SQLite path. A random secret for sessions and credential encryption
+   is generated into `data/secret.key` on first start; set
+   `FILE_NODE_SECRET_KEY` only to a random value of your own
+   (`openssl rand -base64 32`). Turnstile keys are configured later from the
+   admin settings screen.
 
    ```
-   FILE_NODE_SECRET_KEY=optional-separate-secret-for-backend-credential-encryption
+   AUTH_TRUST_HOST=true
    DATABASE_URL=data/data.db
    PORT=3000
    ```
@@ -118,6 +124,8 @@ file-node/
 ├── docker-compose.yml
 ├── docker-entrypoint.sh     # fixes data/ ownership, then drops root
 ├── file-node.sh             # interactive installer (systemd or Docker)
+├── scripts/
+│   └── reset-admin.mjs      # admin password recovery
 ├── data/                    # SQLite database and generated local secret
 ├── next.config.ts
 ├── package.json
@@ -176,7 +184,10 @@ file-node/
 
 | Variable          | Description                             |
 | ----------------- | --------------------------------------- |
-| `FILE_NODE_SECRET_KEY` | Optional persistent server secret for backend credential encryption |
+| `FILE_NODE_SECRET_KEY` | Optional random secret for signing sessions and encrypting backend credentials. Generated into `data/secret.key` when unset. The old public example value is refused |
+| `FILE_NODE_SETUP_TOKEN` | Optional. When set, the first-run `/setup` page also asks for this token (the installer generates one) |
+| `FILE_NODE_DISABLE_TURNSTILE` | Recovery only. Set to `1` to switch every Turnstile check off if a wrong key locked you out of sign-in |
+| `AUTH_TRUST_HOST` | Set to `true` behind a reverse proxy or custom domain |
 | `DATABASE_URL` | SQLite database path. Defaults to `data/data.db`; Docker uses `/app/data/data.db` |
 | `PORT` | Optional port for local/systemd startup |
 | `HOST_PORT` | Docker Compose host port, used by `.env` |
@@ -187,7 +198,31 @@ file-node/
 
 On first run, or whenever the database has no users, open `/setup` to create
 the first local admin account. The setup API is disabled automatically after the
-first user exists. Passwords are stored with bcrypt.
+first user exists. Passwords must be 8 to 72 bytes and are stored with bcrypt. If
+`FILE_NODE_SETUP_TOKEN` is set (the installer sets it and prints it), the setup
+page asks for it, so nobody who finds the server before you can claim the admin
+account.
+
+### Recovering access
+
+Forgot the admin password? Reset it from the command line. This also signs out
+every existing session.
+
+```bash
+# Docker
+docker compose exec -u node file-node node scripts/reset-admin.mjs
+
+# Direct install (from the app directory)
+node scripts/reset-admin.mjs
+```
+
+It prompts for the new password, or reads `FILE_NODE_NEW_PASSWORD`. Use
+`--username NAME` to pick the account if there is more than one.
+
+Locked out because of a wrong Turnstile key? Add `FILE_NODE_DISABLE_TURNSTILE=1`
+to your environment file, restart, sign in, fix the keys in `/admin/settings`
+(the secret key is checked with Cloudflare before protection is enabled), then
+remove the variable and restart.
 
 ### Bot Protection
 
@@ -222,7 +257,7 @@ validation time to remember browse/search verification for that many minutes.
 * **`POST/PUT/DELETE /api/backends`**
   Admin-only: create, update, delete backends.
 * **`POST /api/backends/scan`**
-  Admin-only: trigger manual rescan of a specific backend.
+  Admin-only: start a rescan of a specific backend in the background (responds `202`). Poll `GET /api/backends` for `scanning` and `scanError`.
 * **`GET/PATCH/PUT /api/admin/settings`**
   Admin-only: read Turnstile settings, update Turnstile settings, or update admin credentials.
 * **`POST /api/setup`**
@@ -250,11 +285,23 @@ GitHub Actions in `.github/workflows/`:
 
 ## Security
 
-* Backend passwords are encrypted at rest with `FILE_NODE_SECRET_KEY` or a generated persistent secret in `data/secret.key`. Existing `LIBRIX_SECRET_KEY` and `NEXTAUTH_SECRET` deployments remain supported as fallbacks.
+* Backend passwords are encrypted at rest with `FILE_NODE_SECRET_KEY` or a generated persistent secret in `data/secret.key`. Existing `LIBRIX_SECRET_KEY` and `NEXTAUTH_SECRET` deployments remain supported as fallbacks. The example value that older copies of `example.env.local` shipped is public, so it is ignored (with a warning) and anything encrypted under it is re-encrypted automatically.
 * Turnstile secret keys are encrypted before being stored in the SQLite settings table.
 * Guests cannot access admin APIs or backend credentials.
-* Admin panel and mutating routes require NextAuth credentials.
+* Admin panel and mutating routes require NextAuth credentials. Sessions last 7 days and end when the password changes.
 * Optional Turnstile checks can protect browse, search, and admin sign-in.
-* File proxy requests are checked against the indexed backend root and return `X-Content-Type-Options: nosniff`.
+* Repeated failed sign-ins are throttled, and sign-in takes the same time whether or not the username exists.
+* Backend URLs may not carry a username or password; use the encrypted credential fields.
+* File proxy requests are checked against the indexed backend root, send `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: same-origin`, and SVG/XML files are served sandboxed (`Content-Security-Policy: sandbox`) so script inside them cannot act as the signed-in admin.
+* The PDF viewer runs with PDF.js `isEvalSupported: false`, the documented mitigation for CVE-2024-4367. `npm audit` still lists `pdfjs-dist` because the viewer library cannot move to PDF.js 4.x yet.
+* Pages send `X-Frame-Options: SAMEORIGIN`, so the admin panel cannot be framed by another site.
+* The data directory is private to the app user (`chmod 700`, files `600`); it holds password hashes and encrypted credentials.
+
+### Known limitations
+
+* Turnstile gates the browse and search APIs. The file stream itself (`/api/files/view`) is not gated, because `<img>`, `<video>` and `<audio>` elements cannot send the clearance header.
+* A Turnstile clearance is not bound to one client, so anyone who obtains a valid one can reuse it until it expires.
+* Modified times in directory listings carry no time zone and are taken as UTC. They are exact only when the backend server runs in UTC.
+* Login throttling is held in memory: a restart resets it, and with no reverse proxy the client address header can be spoofed (the per-account limit still applies).
 
 ---
