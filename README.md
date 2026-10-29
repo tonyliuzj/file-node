@@ -126,6 +126,8 @@ file-node/
 ├── file-node.sh             # interactive installer (systemd or Docker)
 ├── scripts/
 │   └── reset-admin.mjs      # admin password recovery
+├── vendor/
+│   └── empty-canvas/        # stand-in for pdfjs-dist's optional native canvas module
 ├── data/                    # SQLite database and generated local secret
 ├── next.config.ts
 ├── package.json
@@ -187,6 +189,7 @@ file-node/
 | `FILE_NODE_SECRET_KEY` | Optional random secret for signing sessions and encrypting backend credentials. Generated into `data/secret.key` when unset. The old public example value is refused |
 | `FILE_NODE_SETUP_TOKEN` | Optional. When set, the first-run `/setup` page also asks for this token (the installer generates one) |
 | `FILE_NODE_DISABLE_TURNSTILE` | Recovery only. Set to `1` to switch every Turnstile check off if a wrong key locked you out of sign-in |
+| `FILE_NODE_TRUST_PROXY` | Set to `1` when a reverse proxy in front of the app sets the client-address headers (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`). Enables per-client rate limits and binds Turnstile clearances to the client. Leave unset when clients connect directly: the headers are then ignored, since any client can forge them |
 | `AUTH_TRUST_HOST` | Set to `true` behind a reverse proxy or custom domain |
 | `DATABASE_URL` | SQLite database path. Defaults to `data/data.db`; Docker uses `/app/data/data.db` |
 | `PORT` | Optional port for local/systemd startup |
@@ -265,11 +268,11 @@ validation time to remember browse/search verification for that many minutes.
 * **`POST /api/turnstile/verify`**
   Verifies a Turnstile token for browse or search and returns a clearance. A cookie is set only when validation time is greater than 0.
 * **`GET /api/files/search?q=`**
-  Public: search for files by name across all backends. May require Turnstile verification if enabled.
-* **`GET /api/files/explorer?backendId=&path=`**
-  Public: list directory entries for a specific backend and path. May require Turnstile verification if enabled.
+  Public: search for files by name across all backends. May require Turnstile verification if enabled. Returns at most 200 matches and sets `X-Result-Truncated: 1` when there were more.
+* **`GET /api/files/explorer?backendId=&path=&limit=&offset=`**
+  Public: list directory entries for a specific backend and path, a page at a time (`limit` defaults to 500, at most 1000). `X-Total-Count` carries the number of entries in the folder. May require Turnstile verification if enabled.
 * **`GET /api/files/view?backendId=&path=`**
-  Public: proxy and stream files (supports HTTP Range requests for video/audio).
+  Public: proxy and stream files (supports HTTP Range requests for video/audio). When Turnstile protects browse or search, it also needs a valid clearance: the `X-File-Node-Turnstile-Clearance` header, the remembered-clearance cookie, or a `clearance=` query parameter (what the viewer uses, since `<img>`, `<video>` and `<audio>` cannot send headers).
 
 ## CI and Releases
 
@@ -290,7 +293,11 @@ GitHub Actions in `.github/workflows/`:
 * Guests cannot access admin APIs or backend credentials.
 * Admin panel and mutating routes require NextAuth credentials. Sessions last 7 days and end when the password changes.
 * Optional Turnstile checks can protect browse, search, and admin sign-in.
-* Repeated failed sign-ins are throttled, and sign-in takes the same time whether or not the username exists.
+* Repeated failed sign-ins are throttled, and sign-in takes the same time whether or not the username exists. Browsers that have signed in before carry a signed, HttpOnly device cookie (retired when the password changes) so a flood of wrong guesses cannot lock the real admin out.
+* Search, listing, file streaming and Turnstile verification have per-client rate limits that answer `429` with `Retry-After`.
+* When Turnstile protects browse or search, the file stream is protected too, and a clearance can be bound to the client (see `FILE_NODE_TRUST_PROXY`).
+* Admin changes are refused when the browser marks the request as coming from another origin.
+* The Docker image has no native image libraries (the unused `canvas` module is replaced by an empty stand-in in `vendor/`), which keeps it small and removes a source of vulnerabilities.
 * Backend URLs may not carry a username or password; use the encrypted credential fields.
 * File proxy requests are checked against the indexed backend root, send `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: same-origin`, and SVG/XML files are served sandboxed (`Content-Security-Policy: sandbox`) so script inside them cannot act as the signed-in admin.
 * The PDF viewer runs with PDF.js `isEvalSupported: false`, the documented mitigation for CVE-2024-4367. `npm audit` still lists `pdfjs-dist` because the viewer library cannot move to PDF.js 4.x yet.
@@ -299,12 +306,11 @@ GitHub Actions in `.github/workflows/`:
 
 ### Known limitations
 
-* Turnstile gates the browse and search APIs. The file stream itself (`/api/files/view`) is not gated, because `<img>`, `<video>` and `<audio>` elements cannot send the clearance header.
-* A Turnstile clearance is not bound to one client, so anyone who obtains a valid one can reuse it until it expires.
+* Without `FILE_NODE_TRUST_PROXY=1` the app cannot tell clients apart, so rate limits are shared by everyone (ten times the per-client numbers) and Turnstile clearances are not bound to a client: a valid clearance works for any holder until it expires. Behind a reverse proxy, set it.
+* With `FILE_NODE_TRUST_PROXY=1`, a clearance stops working if the client's address changes (for example moving between Wi-Fi and mobile data); the visitor just verifies again.
+* A transient Turnstile clearance travels in the file link (`clearance=`) so media elements can use it. It is signed, expires within an hour, and is bound to the client when a proxy is trusted, but it will show in browser history and server logs. Set a validation time in `/admin/settings` to use a cookie instead.
+* Sign-in throttling is held in memory, so a restart resets it. During a guessing attack, a browser you have not signed in from before is held back as well (one you have signed in from before carries a signed device cookie and gets through). Waiting about 15 minutes, or restarting, clears it.
 * Modified times in directory listings carry no time zone and are taken as UTC. They are exact only when the backend server runs in UTC.
-* Login throttling is held in memory: a restart resets it, and with no reverse proxy the client address header can be spoofed (the per-account limit still applies).
-* The per-account limit means someone who knows the admin username can keep the admin from signing in for up to 15 minutes at a time by guessing wrongly. Waiting, or restarting the server, clears it.
-* A folder is listed in one response with no pagination, so a single folder with tens of thousands of entries is slow to open.
-* Public endpoints (search, listing, file streaming) have no per-client rate limit of their own; put a reverse proxy in front if the instance is exposed to the internet.
+* Search matches file names only, from the index, and returns at most 200 results.
 
 ---

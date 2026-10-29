@@ -7,10 +7,15 @@ import {
   verifyTurnstileToken,
   type TurnstileArea,
 } from '@/lib/turnstile';
+import { publicRateLimit } from '@/lib/rate-limit';
 
 const allowedAreas = new Set<TurnstileArea>(['browse', 'search']);
 
 export async function POST(request: NextRequest) {
+  // Every call here costs a request to Cloudflare, so cap them per client.
+  const limited = publicRateLimit(request, 'verify');
+  if (limited) return limited;
+
   try {
     const body = (await request.json()) as {
       area?: unknown;
@@ -34,7 +39,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const clearance = createTurnstileClearance(area);
+    const clearance = createTurnstileClearance(area, request.headers);
     const response = NextResponse.json({ success: true, clearance });
     setTurnstileClearance(response, area, clearance);
     return response;

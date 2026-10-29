@@ -207,6 +207,8 @@ export default function ExplorerClient() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loadingBackends, setLoadingBackends] = useState(true);
   const [loadingEntries, setLoadingEntries] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [totalEntries, setTotalEntries] = useState(0);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -246,6 +248,7 @@ export default function ExplorerClient() {
     async function loadEntries() {
       setLoadingEntries(true);
       setEntries([]);
+      setTotalEntries(0);
       try {
         const res = await fetch(
           `/api/files/explorer?backendId=${backendId}&path=${encodeURIComponent(pathParam)}`,
@@ -260,6 +263,7 @@ export default function ExplorerClient() {
         const data = (await res.json()) as Entry[];
         if (!mounted) return;
         setEntries(data);
+        setTotalEntries(Number(res.headers.get('x-total-count')) || data.length);
       } catch {
         if (mounted) toast.error('Unable to load this directory from the index');
       } finally {
@@ -304,13 +308,45 @@ export default function ExplorerClient() {
     updateUrl(backendId, parentPath());
   };
 
+  // Folders arrive a page at a time; this appends the next one.
+  const loadMore = async () => {
+    if (backendId == null || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/files/explorer?backendId=${backendId}&path=${encodeURIComponent(pathParam)}&offset=${entries.length}`,
+        {
+          cache: 'no-store',
+          headers: turnstileClearance
+            ? { [TURNSTILE_CLEARANCE_HEADER]: turnstileClearance }
+            : undefined,
+        }
+      );
+      if (!res.ok) throw new Error('Failed to load more');
+      const more = (await res.json()) as Entry[];
+      setEntries((current) => [...current, ...more]);
+      setTotalEntries(Number(res.headers.get('x-total-count')) || entries.length + more.length);
+    } catch {
+      toast.error('Unable to load more entries');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Files carry the Turnstile clearance in their link: the viewer is a separate page, and a
+  // clearance that is not remembered would otherwise be lost on the way there.
+  const fileHref = (entry: Entry) =>
+    `/files/${entry.id}?backendId=${backendId}&path=${encodeURIComponent(entry.path)}${
+      turnstileClearance ? `&clearance=${encodeURIComponent(turnstileClearance)}` : ''
+    }`;
+
   // Real links, so rows can be reached with the keyboard and opened in a new tab.
   const browseHref = (path: string) =>
     `/files/browse?backendId=${backendId}&path=${encodeURIComponent(normalizePath(path))}`;
   const entryHref = (entry: Entry) =>
     entry.isDirectory
       ? browseHref(entry.path.endsWith('/') ? entry.path : `${entry.path}/`)
-      : `/files/${entry.id}?backendId=${backendId}&path=${encodeURIComponent(entry.path)}`;
+      : fileHref(entry);
 
   const openEntry = (entry: Entry) => {
     if (!backendId) return;
@@ -319,9 +355,7 @@ export default function ExplorerClient() {
       return;
     }
 
-    router.push(
-      `/files/${entry.id}?backendId=${backendId}&path=${encodeURIComponent(entry.path)}`
-    );
+    router.push(fileHref(entry));
   };
 
   return (
@@ -549,6 +583,17 @@ export default function ExplorerClient() {
                         })}
                       </TableBody>
                     </Table>
+                  )}
+                  {!loadingEntries && entries.length < totalEntries && (
+                    <div className="flex flex-col items-center gap-2 border-t p-4 text-sm text-muted-foreground">
+                      <span>
+                        Showing {entries.length.toLocaleString()} of{' '}
+                        {totalEntries.toLocaleString()} entries
+                      </span>
+                      <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+                        {loadingMore ? 'Loading…' : 'Load more'}
+                      </Button>
+                    </div>
                   )}
                 </CardContent>
               </Card>

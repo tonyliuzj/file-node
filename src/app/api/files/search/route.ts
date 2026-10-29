@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { escapeLike } from '@/lib/security';
 import { requestHasTurnstileClearance } from '@/lib/turnstile';
+import { publicRateLimit } from '@/lib/rate-limit';
 
 const SEARCH_LIMIT = 200;
 
 export function GET(req: NextRequest) {
+  const limited = publicRateLimit(req, 'search');
+  if (limited) return limited;
+
   try {
     if (!requestHasTurnstileClearance(req, 'search')) {
       return NextResponse.json(

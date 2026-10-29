@@ -7,6 +7,7 @@ import { protectSecret } from '@/lib/credentials';
 import { requireAdmin } from '@/lib/admin';
 import { normalizeHttpUrl } from '@/lib/security';
 import { isScanning } from '@/utils/scanner';
+import { publicRateLimit } from '@/lib/rate-limit';
 
 type BackendBody = {
   id?: unknown;
@@ -72,11 +73,16 @@ function getAdminDetails() {
   return rows.map((row) => ({ ...row, scanning: isScanning(row.id) }));
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const user = session?.user as { role?: string } | undefined;
     const isAdmin = session && user?.role === 'admin';
+
+    if (!isAdmin) {
+      const limited = publicRateLimit(req, 'backends');
+      if (limited) return limited;
+    }
 
     const list = isAdmin
       ? getAdminDetails()

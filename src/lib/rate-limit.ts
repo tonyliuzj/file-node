@@ -63,15 +63,71 @@ function readHeader(headers: HeaderBag, name: string) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/** True when the operator says a reverse proxy sets the client-address headers. */
+export function trustsProxy() {
+  return process.env.FILE_NODE_TRUST_PROXY === '1';
+}
+
 /**
- * Best-effort client address. These headers are only trustworthy behind a reverse proxy that sets
- * them, so callers pair this with a per-account limit that does not depend on it.
+ * Identifies the caller for limits and clearances. Address headers are plain text any client can
+ * send, so they are believed only when FILE_NODE_TRUST_PROXY=1 says a proxy in front overwrites
+ * them. Without that, everyone is one shared "direct" client and per-client limits become global
+ * caps, which still protect the server, just less finely.
+ *
+ * With a proxy: Cloudflare's header, then X-Real-IP, then the LAST X-Forwarded-For entry. Proxies
+ * append the address they saw, so the first entry is whatever the client chose to claim.
  */
-export function clientIpFromHeaders(headers: HeaderBag) {
+export function clientIdFromHeaders(headers: HeaderBag) {
+  if (!trustsProxy()) return 'direct';
+
+  const forwarded = readHeader(headers, 'x-forwarded-for')
+    ?.split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
   return (
-    readHeader(headers, 'cf-connecting-ip') ||
-    readHeader(headers, 'x-real-ip') ||
-    readHeader(headers, 'x-forwarded-for')?.split(',')[0]?.trim() ||
+    readHeader(headers, 'cf-connecting-ip')?.trim() ||
+    readHeader(headers, 'x-real-ip')?.trim() ||
+    forwarded?.[forwarded.length - 1] ||
     'unknown'
   );
+}
+
+/** Counts a request against a fixed window; returns seconds to wait when over the limit, else 0. */
+export function takeToken(key: string, limit: number, windowMs: number) {
+  const now = Date.now();
+  prune(now);
+  const bucket = buckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    buckets.set(key, { count: 1, resetAt: now + windowMs });
+    return 0;
+  }
+  bucket.count += 1;
+  return bucket.count > limit ? Math.ceil((bucket.resetAt - now) / 1000) : 0;
+}
+
+type PublicLimitName = 'search' | 'explorer' | 'view' | 'backends' | 'verify';
+
+// Requests per client per minute. Without a trusted proxy everyone shares one bucket, so the same
+// numbers are multiplied to keep ordinary use of a small instance comfortable.
+const PUBLIC_LIMITS: Record<PublicLimitName, number> = {
+  search: 60,
+  explorer: 120,
+  view: 600,
+  backends: 120,
+  verify: 20,
+};
+const SHARED_BUCKET_MULTIPLIER = 10;
+
+/** Returns a 429 response when the caller is over the limit for this endpoint, else null. */
+export function publicRateLimit(request: Request, name: PublicLimitName) {
+  const client = clientIdFromHeaders(request.headers);
+  const limit = PUBLIC_LIMITS[name] * (client === 'direct' ? SHARED_BUCKET_MULTIPLIER : 1);
+  const wait = takeToken(`public:${name}:${client}`, limit, 60_000);
+  if (wait === 0) return null;
+
+  return new Response(JSON.stringify({ error: 'Too many requests. Slow down and try again shortly.' }), {
+    status: 429,
+    headers: { 'content-type': 'application/json', 'retry-after': String(wait) },
+  });
 }

@@ -1,9 +1,10 @@
 import crypto from 'crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers as requestHeaders } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { getPersistentSecret, protectSecret, revealSecret } from '@/lib/credentials';
 import { TURNSTILE_CLEARANCE_HEADER } from '@/lib/turnstile-shared';
+import { clientIdFromHeaders, trustsProxy } from '@/lib/rate-limit';
 
 export type TurnstileArea = 'browse' | 'search' | 'adminLogin';
 
@@ -175,10 +176,22 @@ function getClearanceCookieName(area: TurnstileArea) {
   return `${CLEARANCE_COOKIE_PREFIX}${area}`;
 }
 
-function signClearance(area: TurnstileArea, expiresAt: number) {
+// Ties a clearance to the client that earned it, so a copy handed to someone else (or to a fleet of
+// bots) is refused. Only possible when a trusted proxy reveals the real client address; otherwise
+// there is nothing reliable to bind to and the clearance is valid for any holder until it expires.
+function clientBinding(headers: Headers) {
+  if (!trustsProxy()) return '';
+  return crypto
+    .createHash('sha256')
+    .update(clientIdFromHeaders(headers))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function signClearance(area: TurnstileArea, expiresAt: number, binding: string) {
   return crypto
     .createHmac('sha256', getPersistentSecret())
-    .update(`${area}.${expiresAt}`)
+    .update(`${area}.${expiresAt}.${binding}`)
     .digest('base64url');
 }
 
@@ -191,15 +204,20 @@ function getValidationClearanceSeconds(settings = getTurnstileSettings()) {
   return rememberedSeconds > 0 ? rememberedSeconds : TRANSIENT_CLEARANCE_SECONDS;
 }
 
-function createClearanceValue(area: TurnstileArea, maxAgeSeconds: number) {
+function createClearanceValue(
+  area: TurnstileArea,
+  maxAgeSeconds: number,
+  binding: string
+) {
   const expiresAt = Date.now() + maxAgeSeconds * 1000;
-  return `${expiresAt}.${signClearance(area, expiresAt)}`;
+  return `${expiresAt}.${signClearance(area, expiresAt, binding)}`;
 }
 
 function isClearanceValueValid(
   area: TurnstileArea,
   value: string | undefined,
-  maxAgeSeconds: number
+  maxAgeSeconds: number,
+  binding: string
 ) {
   if (!value) return false;
   const [expiresAtRaw, signature] = value.split('.');
@@ -216,7 +234,7 @@ function isClearanceValueValid(
     return false;
   }
 
-  const expected = signClearance(area, expiresAt);
+  const expected = signClearance(area, expiresAt, binding);
   try {
     return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
   } catch {
@@ -224,32 +242,57 @@ function isClearanceValueValid(
   }
 }
 
-export async function hasTurnstileClearance(area: TurnstileArea) {
+/**
+ * For server-rendered pages. `passedClearance` is a clearance carried in the URL (the viewer page
+ * is reached by a link, and a transient clearance lives only in the browser tab that earned it).
+ */
+export async function hasTurnstileClearance(
+  area: TurnstileArea,
+  passedClearance?: string
+) {
   if (!isTurnstileRequired(area)) return true;
+  const binding = clientBinding(await requestHeaders());
+
+  if (
+    passedClearance &&
+    isClearanceValueValid(
+      area,
+      passedClearance,
+      getValidationClearanceSeconds(),
+      binding
+    )
+  ) {
+    return true;
+  }
+
   const rememberedSeconds = getRememberedClearanceSeconds();
   if (rememberedSeconds <= 0) return false;
   const cookieStore = await cookies();
   return isClearanceValueValid(
     area,
     cookieStore.get(getClearanceCookieName(area))?.value,
-    rememberedSeconds
+    rememberedSeconds,
+    binding
   );
 }
 
 export function requestHasTurnstileClearance(
   request: NextRequest,
-  area: TurnstileArea
+  area: TurnstileArea,
+  passedClearance?: string
 ) {
   if (!isTurnstileRequired(area)) return true;
   const settings = getTurnstileSettings();
   const rememberedSeconds = getRememberedClearanceSeconds(settings);
   const headerClearance = request.headers.get(TURNSTILE_CLEARANCE_HEADER);
+  const binding = clientBinding(request.headers);
 
   if (
     isClearanceValueValid(
       area,
-      headerClearance || undefined,
-      getValidationClearanceSeconds(settings)
+      headerClearance || passedClearance || undefined,
+      getValidationClearanceSeconds(settings),
+      binding
     )
   ) {
     return true;
@@ -260,12 +303,35 @@ export function requestHasTurnstileClearance(
   return isClearanceValueValid(
     area,
     request.cookies.get(getClearanceCookieName(area))?.value,
-    rememberedSeconds
+    rememberedSeconds,
+    binding
   );
 }
 
-export function createTurnstileClearance(area: TurnstileArea) {
-  return createClearanceValue(area, getValidationClearanceSeconds());
+/** Areas whose protection is switched on, i.e. the ones a file stream has to answer to. */
+export function protectedContentAreas() {
+  return (['browse', 'search'] as const).filter((area) => isTurnstileRequired(area));
+}
+
+/**
+ * Files are reached from both browse and search, so a valid clearance for any protected area opens
+ * the stream. Media elements cannot send the clearance header, so it may also arrive as a
+ * `clearance` query parameter or in the remembered-clearance cookie.
+ */
+export function requestHasStreamClearance(request: NextRequest) {
+  const areas = protectedContentAreas();
+  if (areas.length === 0) return true;
+
+  const passed = request.nextUrl.searchParams.get('clearance') || undefined;
+  return areas.some((area) => requestHasTurnstileClearance(request, area, passed));
+}
+
+export function createTurnstileClearance(area: TurnstileArea, headers: Headers) {
+  return createClearanceValue(
+    area,
+    getValidationClearanceSeconds(),
+    clientBinding(headers)
+  );
 }
 
 export function setTurnstileClearance(
@@ -364,11 +430,7 @@ export async function checkTurnstileSecret(
   }
 }
 
+/** The caller's address for Cloudflare's check, only when a trusted proxy makes it believable. */
 export function getRequestIp(request: NextRequest) {
-  return (
-    request.headers.get('cf-connecting-ip') ||
-    request.headers.get('x-real-ip') ||
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    null
-  );
+  return trustsProxy() ? clientIdFromHeaders(request.headers) : null;
 }

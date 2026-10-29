@@ -8,21 +8,19 @@ ARG NPM_VERSION=11.6.2
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Build tools are only a fallback for better-sqlite3 when no prebuilt binary matches the platform.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
-    libcairo2-dev \
-    libgif-dev \
-    libjpeg-dev \
-    libpango1.0-dev \
-    librsvg2-dev \
-    pkg-config \
     python3 \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g "npm@${NPM_VERSION}"
 
+# vendor/ holds the empty stand-in that package.json's "overrides" installs in place of pdfjs-dist's
+# optional native canvas module, so it has to exist before `npm ci` runs.
 COPY package.json package-lock.json ./
+COPY vendor ./vendor
 RUN npm ci
 
 FROM node:22-bookworm-slim AS builder
@@ -47,14 +45,7 @@ ENV NODE_ENV=production \
   DATABASE_URL=/app/data/data.db
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    gosu \
-    libcairo2 \
-    libgif7 \
-    libjpeg62-turbo \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    librsvg2-2 \
+  && apt-get install -y --no-install-recommends gosu \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /app/data \
   && chown -R node:node /app/data

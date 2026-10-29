@@ -26,7 +26,6 @@
     "@react-pdf-viewer/default-layout": "^3.12.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.10.0",
-    "canvas": "^3.2.3",
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -63,7 +62,7 @@
   },
   "overrides": {
     "pdfjs-dist": {
-      "canvas": "$canvas"
+      "canvas": "file:../../vendor/empty-canvas"
     }
   }
 }

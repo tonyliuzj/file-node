@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { revealSecret } from '@/lib/credentials';
+import { publicRateLimit } from '@/lib/rate-limit';
+import { requestHasStreamClearance } from '@/lib/turnstile';
 import {
   contentDisposition,
   isActiveContentType,
@@ -38,6 +40,15 @@ interface FileRecord {
 }
 
 export async function GET(request: NextRequest) {
+  const limited = publicRateLimit(request, 'view');
+  if (limited) return limited;
+
+  // The file itself is what bots are after, so it answers to the same Turnstile protection as the
+  // listings that lead to it.
+  if (!requestHasStreamClearance(request)) {
+    return new NextResponse('Turnstile verification required', { status: 403 });
+  }
+
   const url = request.nextUrl;
 
   const backendIdParam = url.searchParams.get('backendId');

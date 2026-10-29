@@ -1,5 +1,4 @@
 // src/lib/auth.ts
-import crypto from 'crypto';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import type { NextAuthOptions } from 'next-auth';
 import db from '@/utils/db';
@@ -8,10 +7,12 @@ import { getPersistentSecret } from '@/lib/credentials';
 import { isTurnstileRequired, verifyTurnstileToken } from '@/lib/turnstile';
 import {
   clearFailures,
-  clientIpFromHeaders,
+  clientIdFromHeaders,
   recordFailure,
   retryAfterSeconds,
 } from '@/lib/rate-limit';
+import { passwordFingerprint } from '@/lib/password-fingerprint';
+import { isTrustedDevice } from '@/lib/trusted-device';
 
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 // Failed attempts allowed per (client address, username) and per username overall. The second
@@ -26,18 +27,6 @@ const TIMING_EQUALIZER_HASH =
   '$2b$12$QAGxdkg9hhpBY8V2ygabbeGCvkJt/NM2BBb9MEpX/92J7YO3N8q/q';
 
 type UserRow = { id: number; username: string; password: string };
-
-/**
- * Identifies the current password without exposing the hash. Stored in the session token so that
- * changing the password invalidates every session that was issued before it.
- */
-export function passwordFingerprint(passwordHash: string) {
-  return crypto
-    .createHash('sha256')
-    .update(passwordHash)
-    .digest('hex')
-    .slice(0, 16);
-}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -54,12 +43,26 @@ export const authOptions: NextAuthOptions = {
         }
 
         const username = String(credentials.username).slice(0, 64);
-        const clientKey = `login:${clientIpFromHeaders(req?.headers)}:${username.toLowerCase()}`;
+        const clientKey = `login:${clientIdFromHeaders(req?.headers)}:${username.toLowerCase()}`;
         const accountKey = `login-account:${username.toLowerCase()}`;
 
+        const user = db
+          .prepare('SELECT id, username, password FROM users WHERE username = ?')
+          .get(username) as UserRow | undefined;
+
+        // A browser that already signed in successfully holds a signed cookie and is let through,
+        // so guessers cannot lock the real admin out of their own devices.
+        const trustedDevice = user
+          ? isTrustedDevice(
+              (req?.headers as Record<string, string | undefined> | undefined)?.cookie,
+              user
+            )
+          : false;
+
         if (
-          retryAfterSeconds(clientKey, LOGIN_LIMIT_PER_CLIENT) > 0 ||
-          retryAfterSeconds(accountKey, LOGIN_LIMIT_PER_ACCOUNT) > 0
+          !trustedDevice &&
+          (retryAfterSeconds(clientKey, LOGIN_LIMIT_PER_CLIENT) > 0 ||
+            retryAfterSeconds(accountKey, LOGIN_LIMIT_PER_ACCOUNT) > 0)
         ) {
           throw new Error('TooManyAttempts');
         }
@@ -79,10 +82,6 @@ export const authOptions: NextAuthOptions = {
           }
         }
 
-        const user = db
-          .prepare('SELECT id, username, password FROM users WHERE username = ?')
-          .get(username) as UserRow | undefined;
-
         const hash =
           user && user.password.startsWith('$2')
             ? user.password
@@ -96,7 +95,11 @@ export const authOptions: NextAuthOptions = {
           return fail();
         }
 
-        clearFailures(clientKey);
+        // A known browser may have walked past an active throttle; that must not hand the guessers
+        // behind it a fresh budget.
+        if (!trustedDevice) {
+          clearFailures(clientKey);
+        }
         return {
           id: user.id.toString(),
           name: user.username,

@@ -7,7 +7,7 @@ import { assertSetupAvailable } from '@/lib/setup';
 import { USERNAME_PATTERN, USERNAME_RULE, validateNewPassword } from '@/lib/password';
 import {
   clearFailures,
-  clientIpFromHeaders,
+  clientIdFromHeaders,
   recordFailure,
   retryAfterSeconds,
 } from '@/lib/rate-limit';
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const limitKey = `setup:${clientIpFromHeaders(req.headers)}`;
+    const limitKey = `setup:${clientIdFromHeaders(req.headers)}`;
     if (retryAfterSeconds(limitKey, SETUP_LIMIT) > 0) {
       return NextResponse.json(
         { error: 'Too many attempts. Try again later.' },

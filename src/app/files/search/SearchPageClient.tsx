@@ -296,7 +296,9 @@ export default function SearchPageClient() {
                   const Icon = fileIcon(result);
                   const href = isDirectory
                     ? `/files/browse?backendId=${result.backendId}&path=${encodeURIComponent(result.path)}`
-                    : `/files/${result.id}?backendId=${result.backendId}&path=${encodeURIComponent(result.path)}`;
+                    : `/files/${result.id}?backendId=${result.backendId}&path=${encodeURIComponent(result.path)}${
+                        turnstileClearance ? `&clearance=${encodeURIComponent(turnstileClearance)}` : ''
+                      }`;
                   const parentPath =
                     result.path.substring(0, result.path.lastIndexOf('/')) || '/';
 
