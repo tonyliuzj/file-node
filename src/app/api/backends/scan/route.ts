@@ -3,7 +3,7 @@ import { requireAdmin } from '@/lib/admin';
 import { backendExists, startBackendScan } from '@/utils/scanner';
 
 export async function POST(req: NextRequest) {
-  const authErr = await requireAdmin();
+  const authErr = await requireAdmin(req);
   if (authErr) return authErr;
 
   try {

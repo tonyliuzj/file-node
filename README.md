@@ -303,5 +303,8 @@ GitHub Actions in `.github/workflows/`:
 * A Turnstile clearance is not bound to one client, so anyone who obtains a valid one can reuse it until it expires.
 * Modified times in directory listings carry no time zone and are taken as UTC. They are exact only when the backend server runs in UTC.
 * Login throttling is held in memory: a restart resets it, and with no reverse proxy the client address header can be spoofed (the per-account limit still applies).
+* The per-account limit means someone who knows the admin username can keep the admin from signing in for up to 15 minutes at a time by guessing wrongly. Waiting, or restarting the server, clears it.
+* A folder is listed in one response with no pagination, so a single folder with tens of thousands of entries is slow to open.
+* Public endpoints (search, listing, file streaming) have no per-client rate limit of their own; put a reverse proxy in front if the instance is exposed to the internet.
 
 ---

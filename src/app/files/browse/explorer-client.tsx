@@ -294,11 +294,23 @@ export default function ExplorerClient() {
     setMobileSidebarOpen(false);
   };
 
-  const openParent = () => {
+  const parentPath = () => {
     const parts = pathParam.split('/').filter(Boolean);
     parts.pop();
-    updateUrl(backendId, parts.length ? `/${parts.join('/')}` : '/');
+    return parts.length ? `/${parts.join('/')}` : '/';
   };
+
+  const openParent = () => {
+    updateUrl(backendId, parentPath());
+  };
+
+  // Real links, so rows can be reached with the keyboard and opened in a new tab.
+  const browseHref = (path: string) =>
+    `/files/browse?backendId=${backendId}&path=${encodeURIComponent(normalizePath(path))}`;
+  const entryHref = (entry: Entry) =>
+    entry.isDirectory
+      ? browseHref(entry.path.endsWith('/') ? entry.path : `${entry.path}/`)
+      : `/files/${entry.id}?backendId=${backendId}&path=${encodeURIComponent(entry.path)}`;
 
   const openEntry = (entry: Entry) => {
     if (!backendId) return;
@@ -470,7 +482,13 @@ export default function ExplorerClient() {
                                 <span className="flex h-9 w-9 items-center justify-center rounded-md border bg-muted">
                                   <ArrowLeft className="h-4 w-4" />
                                 </span>
-                                <span className="font-medium">Parent folder</span>
+                                <Link
+                                  href={browseHref(parentPath())}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="font-medium hover:underline"
+                                >
+                                  Parent folder
+                                </Link>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -500,9 +518,13 @@ export default function ExplorerClient() {
                                     <Icon className="h-4 w-4" />
                                   </span>
                                   <div className="min-w-0">
-                                    <div className="truncate font-medium">
+                                    <Link
+                                      href={entryHref(entry)}
+                                      onClick={(event) => event.stopPropagation()}
+                                      className="block truncate font-medium hover:underline"
+                                    >
                                       {entry.name}
-                                    </div>
+                                    </Link>
                                     <div className="truncate text-xs text-muted-foreground md:hidden">
                                       {ext}
                                       <span className="px-1">/</span>

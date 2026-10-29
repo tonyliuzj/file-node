@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+# Nothing here needs to write to the repository; Docker Hub is reached with its own secrets.
+permissions:
+  contents: read
+
 concurrency:
   group: docker-publish
   cancel-in-progress: true

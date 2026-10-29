@@ -16,6 +16,12 @@ const nextConfig: NextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
         ],
       },
+      // Proxied files must not reveal this site's address to anything they load. Listed after the
+      // rule above because config headers win over a route's own, and the later rule wins.
+      {
+        source: '/api/files/view',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
     ];
   },
   webpack(config) {

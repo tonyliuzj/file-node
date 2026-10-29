@@ -55,6 +55,7 @@ const FETCH_TIMEOUT_MS = numberFromEnv(
 const SCHEDULER_SLACK_MS = 5_000;
 // A single directory listing larger than this is not a listing worth holding in memory.
 const MAX_LISTING_BYTES = 32 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
 const IGNORED_SCAN_PATH_PREFIXES = ['/cgi-bin/'];
 
 // The cron job and the API routes can be bundled separately, so the bookkeeping lives on
@@ -145,10 +146,37 @@ async function fetchHtml(url: string, authHeader?: string) {
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const res = await fetch(url, {
+    // Redirects are followed by hand. node-fetch only drops credentials when the hostname changes,
+    // so a redirect to another port or subdomain of the same host would receive the password.
+    // A listing from another origin is of no use here anyway: links outside the backend are skipped.
+    const origin = new URL(url).origin;
+    let currentUrl = url;
+    let res = await fetch(currentUrl, {
       headers: authHeader ? { Authorization: authHeader } : undefined,
       signal: controller.signal,
+      redirect: 'manual',
     });
+    for (let hops = 0; res.status >= 300 && res.status < 400; hops++) {
+      const location = res.headers.get('location');
+      if (!location) break;
+      if (hops >= MAX_REDIRECTS) {
+        throw new Error(`Too many redirects while scanning ${url}`);
+      }
+
+      const next = new URL(location, currentUrl);
+      if (next.origin !== origin) {
+        throw new Error(
+          `Backend redirected to ${next.origin}; redirects to another origin are not followed`
+        );
+      }
+      await res.arrayBuffer().catch(() => undefined);
+      currentUrl = next.toString();
+      res = await fetch(currentUrl, {
+        headers: authHeader ? { Authorization: authHeader } : undefined,
+        signal: controller.signal,
+        redirect: 'manual',
+      });
+    }
 
     if (!res.ok) {
       throw new Error(`Backend returned ${res.status} while scanning ${url}`);
@@ -399,10 +427,6 @@ export function isScanning(id: number) {
   return state.running.has(id);
 }
 
-export function scanningBackendIds() {
-  return [...state.running.keys()];
-}
-
 export function backendExists(id: number) {
   return Boolean(db.prepare('SELECT 1 FROM backends WHERE id = ?').get(id));
 }
@@ -419,11 +443,6 @@ export function startBackendScan(id: number): 'started' | 'already-running' {
     console.error(`Scan of backend ${id} failed:`, error);
   });
   return 'started';
-}
-
-export async function scanBackendById(id: number) {
-  if (!backendExists(id)) throw new Error('Backend not found');
-  await trackScan(id);
 }
 
 export async function scanAllDue(): Promise<void> {

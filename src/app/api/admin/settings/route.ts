@@ -36,7 +36,7 @@ export async function GET() {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const authErr = await requireAdmin();
+    const authErr = await requireAdmin(req);
     if (authErr) return authErr;
 
     const body = (await req.json()) as {
@@ -157,7 +157,7 @@ export async function PATCH(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const authErr = await requireAdmin();
+    const authErr = await requireAdmin(req);
     if (authErr) return authErr;
 
     const { currentPassword, newUsername, newPassword } = await req.json();
