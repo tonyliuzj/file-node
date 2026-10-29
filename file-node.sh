@@ -229,12 +229,15 @@ upgrade_system_packages() {
     return 0
   fi
 
+  # Refresh the package lists even when upgrading is skipped: fresh cloud images ship without them,
+  # and every install below fails with "Unable to locate package" until they exist.
+  apt_update
+
   if [ "$SYSTEM_UPGRADE" != "1" ]; then
     echo "Skipping system package upgrade because SYSTEM_UPGRADE=$SYSTEM_UPGRADE."
+    SYSTEM_UPGRADE_DONE=1
     return 0
   fi
-
-  apt_update
 
   step "Upgrading installed system packages..."
   as_root env DEBIAN_FRONTEND=noninteractive apt upgrade -y

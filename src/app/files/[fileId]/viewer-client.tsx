@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Download, FileQuestion, Loader2 } from 'lucide-react';
@@ -20,8 +20,17 @@ function ViewerContent() {
   const path = searchParams.get('path') || '';
 
   // Images, video and audio load by URL and cannot send a header, so when Turnstile protects the
-  // files the clearance rides along as a (short-lived, signed) query parameter.
-  const clearance = useTurnstileClearance() || searchParams.get('clearance') || '';
+  // files the clearance rides along on their URLs as a (short-lived, signed) query parameter.
+  // It is read from the page link once and kept in memory, then removed from the address bar and
+  // the history entry, so it is not left there to be copied, bookmarked or shared.
+  const contextClearance = useTurnstileClearance();
+  const [clearance] = useState(() => contextClearance || searchParams.get('clearance') || '');
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('clearance')) return;
+    url.searchParams.delete('clearance');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   const clearanceQuery = clearance ? `&clearance=${encodeURIComponent(clearance)}` : '';
 
   const src = `/api/files/view?backendId=${encodeURIComponent(backendId)}&path=${encodeURIComponent(path)}${clearanceQuery}`;

@@ -23,6 +23,9 @@ type Props = {
 // pdfjs-dist 3.x (the newest the viewer library supports) can be made to run arbitrary script by a
 // crafted PDF through font handling that relies on eval (CVE-2024-4367). Turning eval off is
 // Mozilla's documented workaround and costs nothing for normal documents.
+//
+// Do not remove this: `npm audit` still lists pdfjs-dist, and this setting is what closes the hole.
+// CI fails if the line below disappears. See "Security" in the README for the full decision.
 const hardenDocumentParams = <T extends object>(options: T): T => ({
     ...options,
     isEvalSupported: false,

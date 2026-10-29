@@ -42,6 +42,14 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # The PDF viewer library pins an old PDF.js with a known script-execution flaw, which this
+      # setting neutralises. Losing it, or the line that applies it, would silently reopen the hole.
+      - name: Check PDF.js hardening is in place
+        run: |
+          file="src/app/files/[fileId]/PdfViewerClient.tsx"
+          grep -qF "isEvalSupported: false" "$file"
+          grep -qF "transformGetDocumentParams={hardenDocumentParams}" "$file"
+
   docker:
     name: Build and push to Docker Hub
     needs: check

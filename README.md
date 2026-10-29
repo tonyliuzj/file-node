@@ -189,7 +189,7 @@ file-node/
 | `FILE_NODE_SECRET_KEY` | Optional random secret for signing sessions and encrypting backend credentials. Generated into `data/secret.key` when unset. The old public example value is refused |
 | `FILE_NODE_SETUP_TOKEN` | Optional. When set, the first-run `/setup` page also asks for this token (the installer generates one) |
 | `FILE_NODE_DISABLE_TURNSTILE` | Recovery only. Set to `1` to switch every Turnstile check off if a wrong key locked you out of sign-in |
-| `FILE_NODE_TRUST_PROXY` | Set to `1` when a reverse proxy in front of the app sets the client-address headers (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`). Enables per-client rate limits and binds Turnstile clearances to the client. Leave unset when clients connect directly: the headers are then ignored, since any client can forge them |
+| `FILE_NODE_TRUST_PROXY` | Set to `1` when a reverse proxy in front of the app sets the client-address headers (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`). Without it those headers are ignored, since any client can forge them, and the app uses the address of the connection itself instead (see Known limitations) |
 | `AUTH_TRUST_HOST` | Set to `true` behind a reverse proxy or custom domain |
 | `DATABASE_URL` | SQLite database path. Defaults to `data/data.db`; Docker uses `/app/data/data.db` |
 | `PORT` | Optional port for local/systemd startup |
@@ -295,20 +295,20 @@ GitHub Actions in `.github/workflows/`:
 * Optional Turnstile checks can protect browse, search, and admin sign-in.
 * Repeated failed sign-ins are throttled, and sign-in takes the same time whether or not the username exists. Browsers that have signed in before carry a signed, HttpOnly device cookie (retired when the password changes) so a flood of wrong guesses cannot lock the real admin out.
 * Search, listing, file streaming and Turnstile verification have per-client rate limits that answer `429` with `Retry-After`.
-* When Turnstile protects browse or search, the file stream is protected too, and a clearance can be bound to the client (see `FILE_NODE_TRUST_PROXY`).
+* When Turnstile protects browse or search, the file stream is protected too, and a clearance is bound to the client's address when that is known (see Known limitations).
 * Admin changes are refused when the browser marks the request as coming from another origin.
 * The Docker image has no native image libraries (the unused `canvas` module is replaced by an empty stand-in in `vendor/`), which keeps it small and removes a source of vulnerabilities.
 * Backend URLs may not carry a username or password; use the encrypted credential fields.
 * File proxy requests are checked against the indexed backend root, send `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: same-origin`, and SVG/XML files are served sandboxed (`Content-Security-Policy: sandbox`) so script inside them cannot act as the signed-in admin.
-* The PDF viewer runs with PDF.js `isEvalSupported: false`, the documented mitigation for CVE-2024-4367. `npm audit` still lists `pdfjs-dist` because the viewer library cannot move to PDF.js 4.x yet.
+* The PDF viewer runs with PDF.js `isEvalSupported: false`, the documented mitigation for CVE-2024-4367 (a crafted PDF running script). It was checked in a real browser: the PDF.js worker receives `false`, and a build without the setting receives `true`. CI fails if the setting is removed. `npm audit` still lists `pdfjs-dist` (advisory GHSA-wgrm-67xf-hhpq, and the viewer sub-packages that depend on it) because the viewer library, `@react-pdf-viewer`, has not been published since March 2023 and cannot move to PDF.js 4 or later. That is a deliberate choice, made to keep the viewer's toolbar, search, print, thumbnails and bookmarks. To get a clean audit instead, replace it with `react-pdf` (current releases audit clean) and rebuild whichever of those features you need.
 * Pages send `X-Frame-Options: SAMEORIGIN`, so the admin panel cannot be framed by another site.
 * The data directory is private to the app user (`chmod 700`, files `600`); it holds password hashes and encrypted credentials.
 
 ### Known limitations
 
-* Without `FILE_NODE_TRUST_PROXY=1` the app cannot tell clients apart, so rate limits are shared by everyone (ten times the per-client numbers) and Turnstile clearances are not bound to a client: a valid clearance works for any holder until it expires. Behind a reverse proxy, set it.
-* With `FILE_NODE_TRUST_PROXY=1`, a clearance stops working if the client's address changes (for example moving between Wi-Fi and mobile data); the visitor just verifies again.
-* A transient Turnstile clearance travels in the file link (`clearance=`) so media elements can use it. It is signed, expires within an hour, and is bound to the client when a proxy is trusted, but it will show in browser history and server logs. Set a validation time in `/admin/settings` to use a cookie instead.
+* Client addresses. With clients connecting straight to the app, per-client limits, sign-in throttling and Turnstile clearance binding use the address of the connection. That only works for public addresses: a request arriving from a private, loopback or link-local address (a LAN, Docker's bridge, or a reverse proxy you have not declared) hides who is calling, so all of those requests share one limit (ten times the per-client numbers) and clearances are not bound to a client. Behind a reverse proxy, set `FILE_NODE_TRUST_PROXY=1` so the real client address is taken from the proxy's headers.
+* Clearance binding follows the client's address, so a clearance stops working when it changes (for example moving between Wi-Fi and mobile data); the visitor just verifies again. IPv6 clients are identified by their /64 prefix, because they rotate addresses within it.
+* A transient Turnstile clearance travels in the file link (`clearance=`) so media elements can use it. The viewer removes it from the address bar and history as soon as the page loads, so it cannot be copied or bookmarked from there, but it remains in the request that opened the page, in the media requests, and in any proxy or server logs. It is signed, expires within an hour, and is bound to the client when the address is known. Set a validation time in `/admin/settings` to use a cookie instead.
 * Sign-in throttling is held in memory, so a restart resets it. During a guessing attack, a browser you have not signed in from before is held back as well (one you have signed in from before carries a signed device cookie and gets through). Waiting about 15 minutes, or restarting, clears it.
 * Modified times in directory listings carry no time zone and are taken as UTC. They are exact only when the backend server runs in UTC.
 * Search matches file names only, from the index, and returns at most 200 results.

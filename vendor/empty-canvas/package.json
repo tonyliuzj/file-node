@@ -1,7 +1,7 @@
 {
   "name": "canvas",
-  "version": "99.0.0",
-  "description": "Empty stand-in for the optional native 'canvas' package that pdfjs-dist lists. File Node only renders PDFs in the browser, so the real module is never used. The version is deliberately above any real canvas release so that audit tools do not mistake this stub for the (old, vulnerable) real package.",
+  "version": "2.99.0",
+  "description": "Empty stand-in for the optional native 'canvas' package that pdfjs-dist lists. File Node only renders PDFs in the browser, so the real module is never used. The version satisfies pdfjs-dist's declared range (^2.11.2) so npm sees a consistent tree, and sits above any real canvas 2.x release and outside the old vulnerable range.",
   "main": "index.js",
   "license": "MIT"
 }

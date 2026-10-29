@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import db from '@/utils/db';
 import { getPersistentSecret, protectSecret, revealSecret } from '@/lib/credentials';
 import { TURNSTILE_CLEARANCE_HEADER } from '@/lib/turnstile-shared';
-import { clientIdFromHeaders, trustsProxy } from '@/lib/rate-limit';
+import { clientIdFromHeaders, trustedClientAddress } from '@/lib/rate-limit';
 
 export type TurnstileArea = 'browse' | 'search' | 'adminLogin';
 
@@ -177,15 +177,13 @@ function getClearanceCookieName(area: TurnstileArea) {
 }
 
 // Ties a clearance to the client that earned it, so a copy handed to someone else (or to a fleet of
-// bots) is refused. Only possible when a trusted proxy reveals the real client address; otherwise
-// there is nothing reliable to bind to and the clearance is valid for any holder until it expires.
+// bots) is refused. Needs a believable client address: the socket's own public address, or the one
+// a trusted proxy reports. Behind a private network or NAT with no trusted proxy there is nothing
+// reliable to bind to, and the clearance is valid for any holder until it expires.
 function clientBinding(headers: Headers) {
-  if (!trustsProxy()) return '';
-  return crypto
-    .createHash('sha256')
-    .update(clientIdFromHeaders(headers))
-    .digest('hex')
-    .slice(0, 16);
+  const client = clientIdFromHeaders(headers);
+  if (client === 'direct' || client === 'unknown') return '';
+  return crypto.createHash('sha256').update(client).digest('hex').slice(0, 16);
 }
 
 function signClearance(area: TurnstileArea, expiresAt: number, binding: string) {
@@ -430,7 +428,7 @@ export async function checkTurnstileSecret(
   }
 }
 
-/** The caller's address for Cloudflare's check, only when a trusted proxy makes it believable. */
+/** The caller's real address for Cloudflare's check, only when it can be believed. */
 export function getRequestIp(request: NextRequest) {
-  return trustsProxy() ? clientIdFromHeaders(request.headers) : null;
+  return trustedClientAddress(request.headers);
 }
